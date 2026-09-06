@@ -13,6 +13,11 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+# Ensure DRIGS repository root is in sys.path
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("drigs-paper-export")
 

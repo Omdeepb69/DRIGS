@@ -14,6 +14,11 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
+# Ensure DRIGS repository root is in sys.path
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
 from drigs.core.models import ComputeDevice, DeviceType
 from drigs.hardware.cpu import CPUBackend
 from drigs.hardware.simulated import SimulatedBackend
@@ -179,7 +184,15 @@ def run_kaggle_evaluation(
             f"VRAM: {gpu['total_vram_gb']} GB | Compute Cap: {gpu['compute_capability']}"
         )
 
-    # 2. Run empirical research experiment suite
+    # 2. Run real PyTorch production workload on CUDA GPUs if available
+    print("\n--- EXECUTING PRODUCTION PYTORCH GPU MODEL WORKLOAD ---")
+    try:
+        from scripts.train_pytorch_workload import run_pytorch_workload
+        run_pytorch_workload(epochs=5, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
+    except Exception as err:
+        logger.warning("Could not execute PyTorch workload: %s", err)
+
+    # 3. Run empirical research experiment suite
     print(f"\n--- EXECUTING EMPIRICAL BENCHMARK SUITE ({num_trials} Trials per Policy) ---")
     start_time = time.monotonic()
     suite_results = run_all_experiments(num_trials=num_trials)

@@ -20,7 +20,7 @@ from drigs.workers.registry import WorkerRegistry
 
 @pytest.fixture
 def api_client():
-    controller = LocalController()
+    controller = LocalController(auto_register_local_node=False)
     worker_registry = WorkerRegistry()
 
     # Register worker and GPU device
