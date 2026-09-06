@@ -1,0 +1,73 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Pytest / Coverage / Tooling
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.nox/
+.tox/
+.hypothesis/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# IDE / Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files & checkpoints
+drigs_checkpoints/
+tmp/
+
+# Project metadata & agent orchestration files
+AGENTS.md
+PROJECT_PLAN.md
+ARCHITECTURE.md
+LESSONS.md
+LEARNING.md
+.agents/rules/01-large-tasks.md
+.agents/rules/00-engineering.md
+.agents/skills/README.md
+.agents/workflows/plan-project.md
+.agents/workflows/implement-task.md
+.agents/workflows/learn.md
+.agents/workflows/ask.md
+.agents/workflows/cap.md
+.agents/workflows/red-team.md
+.agents/workflows/brainstorm.md
+.agents/workflows/continue-project.md
+.agents/workflows/critic.md
+.agents/workflows/investigate.md
