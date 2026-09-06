@@ -184,11 +184,14 @@ def run_kaggle_evaluation(
             f"VRAM: {gpu['total_vram_gb']} GB | Compute Cap: {gpu['compute_capability']}"
         )
 
-    # 2. Run real PyTorch production workload on CUDA GPUs if available
-    print("\n--- EXECUTING PRODUCTION PYTORCH GPU MODEL WORKLOAD ---")
+    # 2. Run real production PyTorch AI model workloads (ResNet-50 & Transformer LLM Encoder)
+    print("\n--- EXECUTING PRODUCTION PYTORCH GPU MODEL WORKLOADS (ResNet-50 & Transformer) ---")
     try:
         from scripts.train_pytorch_workload import run_pytorch_workload
-        run_pytorch_workload(epochs=5, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
+        # Run ResNet-50 Vision Workload
+        run_pytorch_workload(model_type="resnet50", epochs=5, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
+        # Run Transformer Attention Workload
+        run_pytorch_workload(model_type="transformer", epochs=5, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
     except Exception as err:
         logger.warning("Could not execute PyTorch workload: %s", err)
 
