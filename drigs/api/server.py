@@ -1,5 +1,6 @@
 """FastAPI REST Control Plane Server for DRIGS."""
 
+from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, status
@@ -10,6 +11,7 @@ from drigs.core.controller import LocalController
 from drigs.core.models import (
     ClusterState,
     ComputeDevice,
+    DeviceState,
     Job,
     JobStatus,
     WorkloadSpec,
@@ -135,6 +137,50 @@ class APIServer:
                 return [w.model_dump(mode="json") for w in workers]
             workers_dict = getattr(self.resource_manager, "_workers", {})
             return [w.model_dump(mode="json") for w in workers_dict.values()]
+
+        @app.post("/v1/workers/register", status_code=status.HTTP_201_CREATED)
+        def register_worker(worker: WorkerInfo) -> Dict[str, Any]:
+            self.resource_manager.register_worker(worker)
+            if self.worker_registry:
+                self.worker_registry.register(worker)
+            logger.info("Registered worker %s (%s)", worker.worker_id, worker.hostname)
+            return {"status": "registered", "worker_id": worker.worker_id}
+
+        @app.post("/v1/workers/{worker_id}/heartbeat")
+        def worker_heartbeat(worker_id: str, status: Optional[str] = None) -> Dict[str, Any]:
+            dev_state = DeviceState.HEALTHY
+            if status:
+                try:
+                    dev_state = DeviceState(status.upper())
+                except ValueError:
+                    pass
+
+            if self.worker_registry:
+                self.worker_registry.heartbeat(worker_id, status=dev_state)
+
+            workers_dict = getattr(self.resource_manager, "_workers", {})
+            if worker_id in workers_dict:
+                w = workers_dict[worker_id]
+                updated_worker = WorkerInfo(
+                    worker_id=w.worker_id,
+                    hostname=w.hostname,
+                    ip_address=w.ip_address,
+                    devices=w.devices,
+                    total_cpus=w.total_cpus,
+                    total_memory_bytes=w.total_memory_bytes,
+                    status=dev_state,
+                    last_heartbeat=datetime.now(timezone.utc),
+                )
+                self.resource_manager.register_worker(updated_worker)
+
+            return {"status": "acknowledged", "worker_id": worker_id}
+
+        @app.post("/v1/workers/{worker_id}/deregister")
+        def deregister_worker(worker_id: str) -> Dict[str, Any]:
+            self.resource_manager.unregister_worker(worker_id)
+            if self.worker_registry:
+                self.worker_registry.deregister(worker_id)
+            return {"status": "deregistered", "worker_id": worker_id}
 
         @app.get("/v1/gpus", response_model=List[Dict[str, Any]])
         def list_gpus() -> List[Dict[str, Any]]:

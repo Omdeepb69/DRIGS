@@ -300,6 +300,34 @@ def diagnose_cmd(
         raise typer.Exit(code=1)
 
 
+worker_app = typer.Typer(name="worker", help="DRIGS Worker Agent Commands", add_completion=False)
+app.add_typer(worker_app, name="worker")
+
+
+@worker_app.command("agent")
+def worker_agent_cmd(
+    controller_url: str = typer.Option(DEFAULT_SERVER_URL, "--controller-url", "-c", help="DRIGS Control Plane API URL"),
+    worker_id: Optional[str] = typer.Option(None, "--worker-id", "-w", help="Custom worker ID"),
+    heartbeat_interval: float = typer.Option(5.0, "--heartbeat-interval", "-i", help="Heartbeat interval in seconds"),
+    gpu: bool = typer.Option(True, "--gpu/--no-gpu", help="Use CUDA GPU discovery backend if available"),
+):
+    """Start a DRIGS worker agent that registers and heartbeats with a remote DRIGS controller."""
+    from drigs.workers.bootstrap import run_remote_worker_agent
+    console.print(f"[bold green]Starting DRIGS Worker Agent...[/]")
+    console.print(f"Controller URL: [cyan]{controller_url}[/]")
+    if worker_id:
+        console.print(f"Worker ID: [yellow]{worker_id}[/]")
+    try:
+        run_remote_worker_agent(
+            controller_url=controller_url,
+            worker_id=worker_id,
+            heartbeat_interval=heartbeat_interval,
+            use_gpu=gpu,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Worker Agent stopped by user.[/]")
+
+
 def main():
     app()
 
