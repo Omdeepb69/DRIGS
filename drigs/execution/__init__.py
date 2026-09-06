@@ -8,10 +8,12 @@ from drigs.execution.isolation import (
     build_isolated_environment,
     clean_gpu_id,
 )
+from drigs.execution.docker import DockerBackend
 from drigs.execution.distributed import DistributedBackend, find_free_port
 
 __all__ = [
     "NativeProcessBackend",
+    "DockerBackend",
     "GPUIsolationManager",
     "IsolationError",
     "format_cuda_visible_devices",
