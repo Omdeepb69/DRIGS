@@ -203,6 +203,21 @@ def run_kaggle_evaluation(
     suite_results = run_all_experiments(num_trials=num_trials)
     elapsed_sec = round(time.monotonic() - start_time, 2)
 
+    # 4. Run Phase 14 Industry-Scale Benchmark Extensions
+    print("\n--- EXECUTING PHASE 14 INDUSTRY-SCALE BENCHMARK EXTENSIONS ---")
+    try:
+        from experiments.stress_test_queue import benchmark_queue_scaling
+        from scripts.vram_saturation_test import run_vram_saturation_benchmark
+        from experiments.e2e_recovery_test import run_e2e_fault_recovery_benchmark
+
+        suite_results["phase_14_extensions"] = {
+            "queue_stress": benchmark_queue_scaling(job_counts=[500, 1000], output_path=str(out_path / "stress_test_results.json")),
+            "vram_saturation": run_vram_saturation_benchmark(output_path=str(out_path / "vram_saturation_results.json")),
+            "e2e_recovery": run_e2e_fault_recovery_benchmark(output_path=str(out_path / "e2e_recovery_results.json")),
+        }
+    except Exception as err:
+        logger.warning("Could not execute Phase 14 extensions: %s", err)
+
     # Attach hardware telemetry to results JSON
     full_results: Dict[str, Any] = {
         "benchmark_metadata": {
