@@ -1,5 +1,6 @@
 """FastAPI REST Control Plane Server for DRIGS."""
 
+import asyncio
 from datetime import datetime, timezone
 import logging
 import os
@@ -72,23 +73,26 @@ class APIServer:
         )
 
         @app.get("/v1/health")
-        def health_check() -> Dict[str, str]:
+        async def health_check() -> Dict[str, str]:
             return {"status": "ok", "service": "drigs-control-plane"}
 
         @app.get("/metrics", response_class=PlainTextResponse)
-        def get_metrics() -> str:
-            collector = MetricsCollector(
-                job_queue=self.job_queue,
-                resource_manager=self.resource_manager,
-                worker_registry=self.worker_registry,
-            )
-            return collector.generate_prometheus_text()
+        async def get_metrics() -> str:
+            def _gen():
+                collector = MetricsCollector(
+                    job_queue=self.job_queue,
+                    resource_manager=self.resource_manager,
+                    worker_registry=self.worker_registry,
+                )
+                return collector.generate_prometheus_text()
+            return await asyncio.to_thread(_gen)
 
         @app.post("/v1/jobs", response_model=JobSubmitResponse, status_code=status.HTTP_201_CREATED)
-        def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
+        async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
             job_name = req.name or req.spec.name
             try:
-                submitted_job = self.controller.submit_job(
+                submitted_job = await asyncio.to_thread(
+                    self.controller.submit_job,
                     spec_or_content=req.spec,
                     priority=req.priority,
                     job_name=job_name,
@@ -105,39 +109,41 @@ class APIServer:
                 raise HTTPException(status_code=500, detail=f"Internal server error: {e}") from e
 
         @app.get("/v1/jobs", response_model=List[Dict[str, Any]])
-        def list_jobs(status: Optional[JobStatus] = None) -> List[Dict[str, Any]]:
+        async def list_jobs(status: Optional[JobStatus] = None) -> List[Dict[str, Any]]:
             jobs = list(self.job_queue._jobs.values())
             if status is not None:
                 jobs = [j for j in jobs if j.status == status]
             return [j.model_dump(mode="json") for j in jobs]
 
         @app.get("/v1/jobs/{job_id}", response_model=Dict[str, Any])
-        def get_job(job_id: str) -> Dict[str, Any]:
+        async def get_job(job_id: str) -> Dict[str, Any]:
             job = self.controller.get_job(job_id)
             if not job:
                 raise HTTPException(status_code=404, detail=f"Job {job_id} not found.")
             return job.model_dump(mode="json")
 
         @app.get("/v1/jobs/{job_id}/diagnose", response_model=Dict[str, Any])
-        def diagnose_job(job_id: str) -> Dict[str, Any]:
-            analyzer = DiagnosticAnalyzer(
-                controller=self.controller,
-                job_queue=self.job_queue,
-                resource_manager=self.resource_manager,
-                worker_registry=self.worker_registry,
-            )
-            report = analyzer.analyze_job(job_id)
+        async def diagnose_job(job_id: str) -> Dict[str, Any]:
+            def _diag():
+                analyzer = DiagnosticAnalyzer(
+                    controller=self.controller,
+                    job_queue=self.job_queue,
+                    resource_manager=self.resource_manager,
+                    worker_registry=self.worker_registry,
+                )
+                return analyzer.analyze_job(job_id)
+            report = await asyncio.to_thread(_diag)
             return report.model_dump(mode="json")
 
         @app.post("/v1/jobs/{job_id}/cancel")
-        def cancel_job(job_id: str) -> Dict[str, Any]:
-            success = self.controller.cancel_job(job_id)
+        async def cancel_job(job_id: str) -> Dict[str, Any]:
+            success = await asyncio.to_thread(self.controller.cancel_job, job_id)
             if not success:
                 raise HTTPException(status_code=400, detail=f"Failed to cancel job {job_id}.")
             return {"job_id": job_id, "status": "CANCELLED", "message": "Job cancelled successfully."}
 
         @app.get("/v1/workers", response_model=List[Dict[str, Any]])
-        def list_workers() -> List[Dict[str, Any]]:
+        async def list_workers() -> List[Dict[str, Any]]:
             if self.worker_registry:
                 workers = self.worker_registry.get_active_workers()
                 return [w.model_dump(mode="json") for w in workers]
@@ -145,15 +151,15 @@ class APIServer:
             return [w.model_dump(mode="json") for w in workers_dict.values()]
 
         @app.post("/v1/workers/register", status_code=status.HTTP_201_CREATED)
-        def register_worker(worker: WorkerInfo) -> Dict[str, Any]:
-            self.resource_manager.register_worker(worker)
+        async def register_worker(worker: WorkerInfo) -> Dict[str, Any]:
+            await asyncio.to_thread(self.resource_manager.register_worker, worker)
             if self.worker_registry:
-                self.worker_registry.register(worker)
+                await asyncio.to_thread(self.worker_registry.register, worker)
             logger.info("Registered worker %s (%s)", worker.worker_id, worker.hostname)
             return {"status": "registered", "worker_id": worker.worker_id}
 
         @app.post("/v1/workers/{worker_id}/heartbeat")
-        def worker_heartbeat(worker_id: str, status: Optional[str] = None) -> Dict[str, Any]:
+        async def worker_heartbeat(worker_id: str, status: Optional[str] = None) -> Dict[str, Any]:
             dev_state = DeviceState.HEALTHY
             if status:
                 try:
@@ -162,7 +168,7 @@ class APIServer:
                     pass
 
             if self.worker_registry:
-                self.worker_registry.heartbeat(worker_id, status=dev_state)
+                await asyncio.to_thread(self.worker_registry.heartbeat, worker_id, dev_state)
 
             workers_dict = getattr(self.resource_manager, "_workers", {})
             if worker_id in workers_dict:
@@ -177,20 +183,20 @@ class APIServer:
                     status=dev_state,
                     last_heartbeat=datetime.now(timezone.utc),
                 )
-                self.resource_manager.register_worker(updated_worker)
+                await asyncio.to_thread(self.resource_manager.register_worker, updated_worker)
 
             return {"status": "acknowledged", "worker_id": worker_id}
 
         @app.post("/v1/workers/{worker_id}/deregister")
-        def deregister_worker(worker_id: str) -> Dict[str, Any]:
-            self.resource_manager.unregister_worker(worker_id)
+        async def deregister_worker(worker_id: str) -> Dict[str, Any]:
+            await asyncio.to_thread(self.resource_manager.unregister_worker, worker_id)
             if self.worker_registry:
-                self.worker_registry.deregister(worker_id)
+                await asyncio.to_thread(self.worker_registry.deregister, worker_id)
             return {"status": "deregistered", "worker_id": worker_id}
 
         @app.get("/v1/gpus", response_model=List[Dict[str, Any]])
-        def list_gpus() -> List[Dict[str, Any]]:
-            available_devices = self.resource_manager.get_available_devices()
+        async def list_gpus() -> List[Dict[str, Any]]:
+            available_devices = await asyncio.to_thread(self.resource_manager.get_available_devices)
             gpus = [
                 d for d in available_devices
                 if str(getattr(d.device_type, "value", d.device_type)).upper() == "GPU"
@@ -198,8 +204,8 @@ class APIServer:
             return [g.model_dump(mode="json") for g in gpus]
 
         @app.get("/v1/cluster", response_model=Dict[str, Any])
-        def get_cluster_state() -> Dict[str, Any]:
-            state = self.resource_manager.get_cluster_state()
+        async def get_cluster_state() -> Dict[str, Any]:
+            state = await asyncio.to_thread(self.resource_manager.get_cluster_state)
             return state.model_dump(mode="json")
 
         return app

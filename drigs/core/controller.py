@@ -50,6 +50,8 @@ class LocalController:
 
         self._running_event = Event()
         self._loop_thread: Optional[Thread] = None
+        self._async_task: Optional[asyncio.Task] = None
+        self._async_running = False
 
         if storage_backend:
             self.load_persisted_state()
@@ -186,6 +188,10 @@ class LocalController:
 
             return len(self._handles)
 
+    async def async_step(self) -> int:
+        """Run a single non-blocking async control plane orchestration pass."""
+        return await asyncio.to_thread(self.step)
+
     def _loop(self) -> None:
         """Internal worker thread loop executing step() periodically."""
         while self._running_event.is_set():
@@ -214,6 +220,38 @@ class LocalController:
             if self._loop_thread and self._loop_thread.is_alive():
                 self._loop_thread.join(timeout=2.0)
             logger.info("LocalController loop stopped")
+
+    async def start_async(self) -> None:
+        """Start the background control plane loop as an asyncio.Task."""
+        with self._lock:
+            if self._async_task is not None and not self._async_task.done():
+                return
+            self._async_running = True
+
+            async def _async_loop():
+                while self._async_running:
+                    try:
+                        await self.async_step()
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as err:
+                        logger.error("Error in LocalController async loop: %s", err)
+                    await asyncio.sleep(self.poll_interval_seconds)
+
+            self._async_task = asyncio.create_task(_async_loop())
+            logger.info("LocalController async loop started")
+
+    async def stop_async(self) -> None:
+        """Stop the background asyncio control plane loop."""
+        self._async_running = False
+        if self._async_task is not None:
+            self._async_task.cancel()
+            try:
+                await self._async_task
+            except asyncio.CancelledError:
+                pass
+            self._async_task = None
+            logger.info("LocalController async loop stopped")
 
     def cancel_job(self, job_id: str) -> bool:
         """Cancel a queued or running job and release its allocated resources."""
