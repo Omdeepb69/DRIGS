@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 import logging
 from threading import RLock
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from drigs.core.interfaces import WorkerRegistryProtocol
 from drigs.core.models import DeviceState, WorkerInfo
@@ -18,10 +18,21 @@ def _now_utc() -> datetime:
 class WorkerRegistry:
     """Thread-safe central registry tracking active worker nodes and detecting heartbeat timeouts."""
 
-    def __init__(self, timeout_seconds: float = 15.0):
+    def __init__(self, timeout_seconds: float = 15.0, storage_backend: Optional[Any] = None):
         self.timeout_seconds = timeout_seconds
+        self.storage_backend = storage_backend
         self._workers: Dict[str, WorkerInfo] = {}
         self._lock = RLock()
+
+    def load_from_storage(self) -> int:
+        """Load and restore worker registrations from storage backend."""
+        with self._lock:
+            if not self.storage_backend:
+                return 0
+            stored_workers = self.storage_backend.load_all_workers()
+            for worker in stored_workers:
+                self._workers[worker.worker_id] = worker
+            return len(stored_workers)
 
     def register(self, worker: WorkerInfo) -> bool:
         """Register a new or re-connected worker node."""
@@ -38,6 +49,8 @@ class WorkerRegistry:
                 last_heartbeat=worker.last_heartbeat or _now_utc(),
             )
             self._workers[worker.worker_id] = updated_worker
+            if self.storage_backend:
+                self.storage_backend.save_worker(updated_worker)
             logger.info("Registered worker %s (%s)", worker.worker_id, worker.hostname)
             return True
 
@@ -60,6 +73,8 @@ class WorkerRegistry:
                 last_heartbeat=_now_utc(),
             )
             self._workers[worker_id] = updated_worker
+            if self.storage_backend:
+                self.storage_backend.save_worker(updated_worker)
             return True
 
     def deregister(self, worker_id: str) -> bool:
@@ -67,6 +82,8 @@ class WorkerRegistry:
         with self._lock:
             if worker_id in self._workers:
                 del self._workers[worker_id]
+                if self.storage_backend:
+                    self.storage_backend.delete_worker(worker_id)
                 logger.info("Deregistered worker %s", worker_id)
                 return True
             return False

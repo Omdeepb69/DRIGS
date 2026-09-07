@@ -30,6 +30,7 @@ def test_run_kaggle_evaluation(tmp_path: Path):
         num_trials=1,
         use_simulated=True,
         output_dir=out_dir,
+        run_pytorch=False,
     )
 
     assert isinstance(results, dict)

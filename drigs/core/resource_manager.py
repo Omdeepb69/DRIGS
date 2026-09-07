@@ -2,7 +2,7 @@
 
 import logging
 from threading import RLock
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from pydantic import ValidationError
 
 from drigs.core.models import (
@@ -27,13 +27,34 @@ class ResourceError(Exception):
 class ResourceManager:
     """Thread-safe resource state and allocation manager."""
 
-    def __init__(self):
+    def __init__(self, storage_backend: Optional[Any] = None):
         self._lock = RLock()
+        self.storage_backend = storage_backend
         self._workers: Dict[str, WorkerInfo] = {}
         self._device_states: Dict[str, ResourceState] = {}  # key: f"{worker_id}:{device_id}"
         self._device_allocated_memory: Dict[str, int] = {}  # key: f"{worker_id}:{device_id}"
         self._allocations: Dict[str, ResourceAllocation] = {}  # allocation_id -> ResourceAllocation
         self._job_allocations: Dict[str, str] = {}  # job_id -> allocation_id
+
+    def load_from_storage(self) -> int:
+        """Load and restore workers and resource allocations from storage backend."""
+        with self._lock:
+            if not self.storage_backend:
+                return 0
+
+            stored_workers = self.storage_backend.load_all_workers()
+            for worker in stored_workers:
+                self.register_worker(worker)
+
+            stored_allocs = self.storage_backend.load_all_allocations()
+            for alloc in stored_allocs:
+                self._allocations[alloc.allocation_id] = alloc
+                self._job_allocations[alloc.job_id] = alloc.allocation_id
+                for dev_id in alloc.assigned_device_ids:
+                    key = f"{alloc.worker_id}:{dev_id}"
+                    self._device_states[key] = ResourceState.ALLOCATED
+
+            return len(stored_allocs)
 
     def register_worker(self, worker: WorkerInfo) -> None:
         """Register or update a worker node and its compute devices."""
@@ -44,6 +65,8 @@ class ResourceManager:
                 if key not in self._device_states:
                     self._device_states[key] = ResourceState.AVAILABLE
                     self._device_allocated_memory[key] = 0
+            if self.storage_backend:
+                self.storage_backend.save_worker(worker)
 
     def unregister_worker(self, worker_id: str) -> None:
         """Unregister a worker node and mark its resources unavailable."""
@@ -53,6 +76,8 @@ class ResourceManager:
                 for device in worker.devices:
                     key = f"{worker_id}:{device.device_id}"
                     self._device_states[key] = ResourceState.UNAVAILABLE
+                if self.storage_backend:
+                    self.storage_backend.delete_worker(worker_id)
 
     def update_device_status(self, worker_id: str, status: DeviceStatus) -> None:
         """Update live status for a specific compute device."""
@@ -135,26 +160,26 @@ class ResourceManager:
 
             self._allocations[allocation.allocation_id] = allocation
             self._job_allocations[job_id] = allocation.allocation_id
+            if self.storage_backend:
+                self.storage_backend.save_allocation(allocation)
             return allocation
 
     def deallocate_resources(self, allocation_id_or_job_id: str) -> bool:
-        """Deallocate resources by allocation_id or job_id."""
+        """Deallocate resources for an allocation or job ID."""
         with self._lock:
-            alloc_id = allocation_id_or_job_id
-            if alloc_id in self._job_allocations:
-                alloc_id = self._job_allocations[alloc_id]
-
-            if alloc_id not in self._allocations:
+            alloc_id = self._job_allocations.pop(allocation_id_or_job_id, allocation_id_or_job_id)
+            alloc = self._allocations.pop(alloc_id, None)
+            if not alloc:
                 return False
 
-            allocation = self._allocations.pop(alloc_id)
-            self._job_allocations.pop(allocation.job_id, None)
-
-            worker_id = allocation.worker_id
-            for dev_id in allocation.assigned_device_ids:
+            worker_id = alloc.worker_id
+            for dev_id in alloc.assigned_device_ids:
                 key = f"{worker_id}:{dev_id}"
                 self._device_states[key] = ResourceState.AVAILABLE
                 self._device_allocated_memory[key] = 0
+
+            if self.storage_backend:
+                self.storage_backend.delete_allocation(alloc.job_id)
 
             return True
 

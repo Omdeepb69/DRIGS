@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 import logging
 from threading import RLock
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from drigs.core.models import Job, JobStatus
 
@@ -101,11 +101,26 @@ class AdmissionController:
 class JobQueue:
     """Thread-safe priority job queue managing queued and active jobs."""
 
-    def __init__(self, max_capacity: Optional[int] = None):
+    def __init__(self, max_capacity: Optional[int] = None, storage_backend: Optional[Any] = None):
         self._lock = RLock()
         self.max_capacity = max_capacity
+        self.storage_backend = storage_backend
         self._queue: List[Job] = []  # Kept sorted by (-priority, submitted_at)
         self._jobs: Dict[str, Job] = {}  # job_id -> Job
+
+    def load_from_storage(self) -> int:
+        """Load and restore jobs from storage backend into queue."""
+        with self._lock:
+            if not self.storage_backend:
+                return 0
+            stored_jobs = self.storage_backend.load_all_jobs()
+            for job in stored_jobs:
+                self._jobs[job.id] = job
+                if job.status == JobStatus.QUEUED:
+                    if job not in self._queue:
+                        self._queue.append(job)
+            self._sort_queue()
+            return len(stored_jobs)
 
     def _sort_queue(self) -> None:
         self._queue.sort(key=lambda j: (-j.priority, j.submitted_at))
@@ -125,6 +140,8 @@ class JobQueue:
             self._jobs[job.id] = job
             self._queue.append(job)
             self._sort_queue()
+            if self.storage_backend:
+                self.storage_backend.save_job(job)
 
     def dequeue(self) -> Optional[Job]:
         """Pop and return the highest priority queued job."""
@@ -158,6 +175,8 @@ class JobQueue:
             job = self._jobs.pop(job_id, None)
             if job and job in self._queue:
                 self._queue.remove(job)
+            if job and self.storage_backend:
+                self.storage_backend.delete_job(job_id)
             return job
 
     def update_job_status(
@@ -185,6 +204,9 @@ class JobQueue:
 
             if error_message is not None:
                 job.error_message = error_message
+
+            if self.storage_backend:
+                self.storage_backend.save_job(job)
 
             return job
 

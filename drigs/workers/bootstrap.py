@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timezone
 import logging
+import os
 from typing import List, Optional
 import httpx
 
@@ -20,12 +21,21 @@ def _now_utc() -> datetime:
 class RemoteHTTPWorkerRegistryClient(WorkerRegistryProtocol):
     """HTTP REST client implementing WorkerRegistryProtocol for outbound worker registration & heartbeat dispatch."""
 
-    def __init__(self, controller_url: str, timeout: float = 10.0):
+    def __init__(
+        self,
+        controller_url: str,
+        timeout: float = 10.0,
+        api_key: Optional[str] = None,
+    ):
         self.controller_url = controller_url.rstrip("/")
         self.timeout = timeout
+        self.api_key = api_key or os.getenv("DRIGS_API_KEY")
 
     def _get_client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.controller_url, timeout=self.timeout)
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return httpx.Client(base_url=self.controller_url, timeout=self.timeout, headers=headers)
 
     def register(self, worker: WorkerInfo) -> bool:
         """Register worker with central DRIGS REST control plane API."""
@@ -84,9 +94,13 @@ def create_remote_worker_agent(
     worker_id: Optional[str] = None,
     heartbeat_interval: float = 5.0,
     use_gpu: bool = True,
+    api_key: Optional[str] = None,
 ) -> WorkerAgent:
     """Construct and configure a WorkerAgent connected to a remote control plane controller URL."""
-    registry_client = RemoteHTTPWorkerRegistryClient(controller_url=controller_url)
+    registry_client = RemoteHTTPWorkerRegistryClient(
+        controller_url=controller_url,
+        api_key=api_key,
+    )
 
     hardware_backend: HardwareBackend
     if use_gpu:
@@ -124,6 +138,7 @@ def run_remote_worker_agent(
     heartbeat_interval: float = 5.0,
     use_gpu: bool = True,
     duration_seconds: Optional[float] = None,
+    api_key: Optional[str] = None,
 ) -> WorkerAgent:
     """Start and run a remote worker agent loop connected to a DRIGS control plane URL."""
     agent = create_remote_worker_agent(
@@ -131,6 +146,7 @@ def run_remote_worker_agent(
         worker_id=worker_id,
         heartbeat_interval=heartbeat_interval,
         use_gpu=use_gpu,
+        api_key=api_key,
     )
 
     async def _main():

@@ -1,6 +1,7 @@
 """DRIGS Command Line Interface (Typer)."""
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 import httpx
@@ -19,8 +20,34 @@ console = Console()
 DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 
 
-def _get_client(server_url: str) -> httpx.Client:
-    return httpx.Client(base_url=server_url.rstrip("/"), timeout=10.0)
+def _get_client(server_url: str, api_key: Optional[str] = None) -> httpx.Client:
+    key = api_key or os.getenv("DRIGS_API_KEY")
+    headers = {}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return httpx.Client(base_url=server_url.rstrip("/"), timeout=10.0, headers=headers)
+
+
+@app.command("server")
+def server_cmd(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host interface to bind REST API server"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind REST API server"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="API key for REST authentication"),
+    no_auth: bool = typer.Option(False, "--no-auth", help="Disable API authentication (local dev mode)"),
+):
+    """Start the DRIGS Control Plane REST API Server."""
+    import uvicorn
+    from drigs.api.server import APIServer
+
+    key = "" if no_auth else (api_key or os.getenv("DRIGS_API_KEY"))
+    server = APIServer(api_key=key)
+    console.print("[bold green]Starting DRIGS Control Plane API Server...[/]")
+    console.print(f"Listening on [cyan]http://{host}:{port}[/]")
+    if key:
+        console.print("[yellow]Authentication enabled (API Key / Bearer Token required)[/]")
+    else:
+        console.print("[dim]Authentication disabled (Local dev mode)[/]")
+    uvicorn.run(server.app, host=host, port=port)
 
 
 @app.command("submit")
@@ -29,6 +56,7 @@ def submit_cmd(
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Override job name"),
     priority: int = typer.Option(0, "--priority", "-p", help="Job scheduling priority"),
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """Submit a workload spec to the DRIGS cluster."""
     path = Path(spec_path)
@@ -50,14 +78,14 @@ def submit_cmd(
     }
 
     try:
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.post("/v1/jobs", json=payload)
             if res.status_code != 201:
                 console.print(f"[bold red]Submission failed ({res.status_code}):[/] {res.text}")
                 raise typer.Exit(code=1)
 
             data = res.json()
-            console.print(f"[bold green]Job Submitted Successfully![/]")
+            console.print("[bold green]Job Submitted Successfully![/]")
             console.print(f"Job ID: [cyan]{data['job_id']}[/]")
             console.print(f"Status: [yellow]{data['status']}[/]")
     except httpx.RequestError as e:
@@ -69,11 +97,12 @@ def submit_cmd(
 def list_jobs_cmd(
     status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by job status"),
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """List all submitted jobs and their status."""
     try:
         params = {"status": status.upper()} if status else {}
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.get("/v1/jobs", params=params)
             if res.status_code != 200:
                 console.print(f"[bold red]Failed to fetch jobs ({res.status_code}):[/] {res.text}")
@@ -112,10 +141,11 @@ def list_jobs_cmd(
 @app.command("workers")
 def list_workers_cmd(
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """List all registered worker nodes in the DRIGS cluster."""
     try:
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.get("/v1/workers")
             if res.status_code != 200:
                 console.print(f"[bold red]Failed to fetch workers ({res.status_code}):[/] {res.text}")
@@ -154,10 +184,11 @@ def list_workers_cmd(
 @app.command("gpus")
 def list_gpus_cmd(
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """List all compute devices (GPUs) available in the cluster."""
     try:
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.get("/v1/gpus")
             if res.status_code != 200:
                 console.print(f"[bold red]Failed to fetch GPUs ({res.status_code}):[/] {res.text}")
@@ -192,10 +223,11 @@ def list_gpus_cmd(
 def inspect_job_cmd(
     job_id: str = typer.Argument(..., help="ID of job to inspect"),
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """Inspect detailed specification and status of a specific job."""
     try:
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.get(f"/v1/jobs/{job_id}")
             if res.status_code == 404:
                 console.print(f"[bold red]Error:[/] Job '{job_id}' not found.")
@@ -216,16 +248,16 @@ def inspect_job_cmd(
 def cancel_job_cmd(
     job_id: str = typer.Argument(..., help="ID of job to cancel"),
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """Cancel a queued or running job in the cluster."""
     try:
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.post(f"/v1/jobs/{job_id}/cancel")
             if res.status_code != 200:
                 console.print(f"[bold red]Failed to cancel job '{job_id}' ({res.status_code}):[/] {res.text}")
                 raise typer.Exit(code=1)
 
-            data = res.json()
             console.print(f"[bold green]Job '{job_id}' cancelled successfully.[/]")
     except httpx.RequestError as e:
         console.print(f"[bold red]Connection Error:[/] Could not connect to DRIGS API at '{url}': {e}")
@@ -237,10 +269,11 @@ def logs_cmd(
     job_id: str = typer.Argument(..., help="ID of job to retrieve logs for"),
     lines: Optional[int] = typer.Option(None, "--lines", "-l", help="Number of recent log lines to print"),
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """View log outputs for a specific job."""
     try:
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.get(f"/v1/jobs/{job_id}")
             if res.status_code != 200:
                 console.print(f"[bold red]Error fetching job '{job_id}':[/] {res.text}")
@@ -266,10 +299,11 @@ def logs_cmd(
 def diagnose_cmd(
     job_id: str = typer.Argument(..., help="ID of job to diagnose"),
     url: str = typer.Option(DEFAULT_SERVER_URL, "--url", "-u", help="DRIGS Control Plane API URL"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """Diagnose job execution bottlenecks, memory pressure, and status."""
     try:
-        with _get_client(url) as client:
+        with _get_client(url, api_key=api_key) as client:
             res = client.get(f"/v1/jobs/{job_id}")
             if res.status_code != 200:
                 console.print(f"[bold red]Error fetching job '{job_id}':[/] {res.text}")
@@ -310,10 +344,11 @@ def worker_agent_cmd(
     worker_id: Optional[str] = typer.Option(None, "--worker-id", "-w", help="Custom worker ID"),
     heartbeat_interval: float = typer.Option(5.0, "--heartbeat-interval", "-i", help="Heartbeat interval in seconds"),
     gpu: bool = typer.Option(True, "--gpu/--no-gpu", help="Use CUDA GPU discovery backend if available"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", envvar="DRIGS_API_KEY", help="DRIGS API key for authentication"),
 ):
     """Start a DRIGS worker agent that registers and heartbeats with a remote DRIGS controller."""
     from drigs.workers.bootstrap import run_remote_worker_agent
-    console.print(f"[bold green]Starting DRIGS Worker Agent...[/]")
+    console.print("[bold green]Starting DRIGS Worker Agent...[/]")
     console.print(f"Controller URL: [cyan]{controller_url}[/]")
     if worker_id:
         console.print(f"Worker ID: [yellow]{worker_id}[/]")
@@ -323,6 +358,7 @@ def worker_agent_cmd(
             worker_id=worker_id,
             heartbeat_interval=heartbeat_interval,
             use_gpu=gpu,
+            api_key=api_key,
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Worker Agent stopped by user.[/]")

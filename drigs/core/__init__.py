@@ -40,6 +40,7 @@ from drigs.core.queue import (
     StateTransitionError,
 )
 from drigs.core.controller import LocalController
+from drigs.core.storage import SQLiteStore
 
 __all__ = [
     "Job",
@@ -74,4 +75,5 @@ __all__ = [
     "JobQueue",
     "StateTransitionError",
     "LocalController",
+    "SQLiteStore",
 ]

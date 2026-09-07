@@ -34,12 +34,14 @@ class LocalController:
         admission_controller: Optional[AdmissionController] = None,
         poll_interval_seconds: float = 0.2,
         auto_register_local_node: bool = True,
+        storage_backend: Optional[Any] = None,
     ):
-        self.resource_manager = resource_manager or ResourceManager()
+        self.storage_backend = storage_backend
+        self.resource_manager = resource_manager or ResourceManager(storage_backend=storage_backend)
         self.scheduler = scheduler or FIFOScheduler()
         self.execution_backend = execution_backend or NativeProcessBackend()
         self.admission_controller = admission_controller or AdmissionController()
-        self.job_queue = JobQueue()
+        self.job_queue = JobQueue(storage_backend=storage_backend)
 
         self.poll_interval_seconds = poll_interval_seconds
         self._lock = RLock()
@@ -49,8 +51,27 @@ class LocalController:
         self._running_event = Event()
         self._loop_thread: Optional[Thread] = None
 
+        if storage_backend:
+            self.load_persisted_state()
+
         if auto_register_local_node:
             self._auto_register_local_worker()
+
+    def load_persisted_state(self) -> Dict[str, int]:
+        """Restore jobs, workers, and allocations from storage backend into controller memory."""
+        with self._lock:
+            if not self.storage_backend:
+                return {"jobs": 0, "workers": 0, "allocations": 0}
+
+            restored_workers = self.resource_manager.load_from_storage()
+            restored_jobs = self.job_queue.load_from_storage()
+
+            logger.info(
+                "Restored control plane state from storage: %d worker(s), %d job(s)",
+                restored_workers,
+                restored_jobs,
+            )
+            return {"jobs": restored_jobs, "workers": restored_workers}
 
     def _auto_register_local_worker(self) -> None:
         """Register the local machine host as worker-local if no workers are present."""

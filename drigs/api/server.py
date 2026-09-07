@@ -2,11 +2,13 @@
 
 from datetime import datetime, timezone
 import logging
+import os
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from drigs.api.auth import APIKeyAuth
 from drigs.core.controller import LocalController
 from drigs.core.models import (
     ClusterState,
@@ -51,18 +53,22 @@ class APIServer:
         job_queue: Optional[JobQueue] = None,
         worker_registry: Optional[WorkerRegistry] = None,
         resource_manager: Optional[ResourceManager] = None,
+        api_key: Optional[str] = None,
     ):
         self.controller = controller or LocalController()
         self.job_queue = job_queue or self.controller.job_queue
         self.worker_registry = worker_registry
         self.resource_manager = resource_manager or self.controller.resource_manager
+        self.api_key = api_key if api_key is not None else os.getenv("DRIGS_API_KEY")
         self.app = self._build_app()
 
     def _build_app(self) -> FastAPI:
+        auth_dep = APIKeyAuth(api_key=self.api_key)
         app = FastAPI(
             title="DRIGS Control Plane API",
             description="Distributed Resource & Intelligent GPU Scheduling REST API",
             version="0.1.0",
+            dependencies=[Depends(auth_dep)],
         )
 
         @app.get("/v1/health")

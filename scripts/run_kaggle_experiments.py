@@ -166,6 +166,7 @@ def run_kaggle_evaluation(
     num_trials: int = 5,
     use_simulated: bool = False,
     output_dir: str = "kaggle_results",
+    run_pytorch: bool = True,
 ) -> Dict[str, Any]:
     """Execute complete DRIGS GPU benchmark evaluation suite and export paper metrics."""
     print("\n" + "=" * 80)
@@ -184,16 +185,17 @@ def run_kaggle_evaluation(
             f"VRAM: {gpu['total_vram_gb']} GB | Compute Cap: {gpu['compute_capability']}"
         )
 
-    # 2. Run real open-source PyTorch & HuggingFace AI model workloads (DistilBERT LLM & ResNet-50 Vision)
-    print("\n--- EXECUTING OPEN-SOURCE AI MODEL WORKLOADS (HuggingFace DistilBERT & TorchVision ResNet-50) ---")
-    try:
-        from scripts.train_pytorch_workload import run_pytorch_workload
-        # Run Open-Source HuggingFace DistilBERT LLM Workload
-        run_pytorch_workload(model_type="distilbert", epochs=5, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
-        # Run Open-Source TorchVision ResNet-50 Workload
-        run_pytorch_workload(model_type="resnet50", epochs=5, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
-    except Exception as err:
-        logger.warning("Could not execute PyTorch workload: %s", err)
+    # 2. Run real open-source PyTorch & HuggingFace AI model workloads if enabled
+    if run_pytorch:
+        print("\n--- EXECUTING OPEN-SOURCE AI MODEL WORKLOADS (HuggingFace DistilBERT & TorchVision ResNet-50) ---")
+        try:
+            from scripts.train_pytorch_workload import run_pytorch_workload
+            # Run Open-Source HuggingFace DistilBERT LLM Workload
+            run_pytorch_workload(model_type="distilbert", epochs=2, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
+            # Run Open-Source TorchVision ResNet-50 Workload
+            run_pytorch_workload(model_type="resnet50", epochs=2, vram_alloc_mb=512, checkpoint_dir=str(out_path / "checkpoints"))
+        except Exception as err:
+            logger.warning("Could not execute PyTorch workload: %s", err)
 
     # 3. Run empirical research experiment suite
     print(f"\n--- EXECUTING EMPIRICAL BENCHMARK SUITE ({num_trials} Trials per Policy) ---")
