@@ -211,7 +211,7 @@ def run_kaggle_evaluation(
         from experiments.e2e_recovery_test import run_e2e_fault_recovery_benchmark
 
         suite_results["phase_14_extensions"] = {
-            "queue_stress": benchmark_queue_scaling(job_counts=[500, 1000], output_path=str(out_path / "stress_test_results.json")),
+            "queue_stress": benchmark_queue_scaling(job_counts=[500, 1000]),
             "vram_saturation": run_vram_saturation_benchmark(output_path=str(out_path / "vram_saturation_results.json")),
             "e2e_recovery": run_e2e_fault_recovery_benchmark(output_path=str(out_path / "e2e_recovery_results.json")),
         }
