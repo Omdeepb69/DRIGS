@@ -6,10 +6,16 @@ import os
 import signal
 import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from threading import RLock
-from typing import AsyncIterator, Dict, List, Optional
+from typing import AsyncIterator, Dict, List, Optional, Set
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 from drigs.core.interfaces import ExecutionHandle
 from drigs.core.models import (
@@ -42,7 +48,7 @@ class ProcessRecord:
 
 
 class NativeProcessBackend:
-    """Native OS subprocess execution backend with GPU isolation and log streaming."""
+    """Native OS subprocess execution backend with GPU isolation, process tree cleanup, and orphan sweeper."""
 
     def __init__(self, log_dir: Optional[str] = None):
         if log_dir:
@@ -53,6 +59,8 @@ class NativeProcessBackend:
 
         self._lock = RLock()
         self._processes: Dict[str, ProcessRecord] = {}
+        self._sweeper_task: Optional[asyncio.Task] = None
+        self._sweeper_running = False
 
     def launch(self, job: Job, allocation: ResourceAllocation) -> ExecutionHandle:
         """Launch job as a native process bound to allocated devices."""
@@ -165,8 +173,53 @@ class NativeProcessBackend:
             record.handle.status = record.completed_status
             return record.completed_status
 
-    def stop(self, handle: ExecutionHandle) -> bool:
-        """Stop/terminate process associated with handle."""
+    def terminate_process_tree(self, pid: int, timeout: float = 2.0) -> List[int]:
+        """Recursively terminate process tree starting at target PID (SIGTERM -> SIGKILL)."""
+        terminated_pids: List[int] = []
+        if psutil is not None:
+            try:
+                parent = psutil.Process(pid)
+                children = parent.children(recursive=True)
+                procs = children + [parent]
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                procs = []
+
+            for p in procs:
+                try:
+                    p.terminate()
+                    terminated_pids.append(p.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            if procs:
+                gone, alive = psutil.wait_procs(procs, timeout=timeout)
+                for p in alive:
+                    try:
+                        p.kill()
+                        if p.pid not in terminated_pids:
+                            terminated_pids.append(p.pid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+        else:
+            try:
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGTERM)
+                terminated_pids.append(pid)
+                time.sleep(min(timeout, 0.5))
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    terminated_pids.append(pid)
+                except Exception:
+                    pass
+
+        return terminated_pids
+
+    def stop(self, handle: ExecutionHandle, timeout: float = 2.0) -> bool:
+        """Stop/terminate process tree associated with handle."""
         with self._lock:
             record = self._processes.get(handle.handle_id)
             if not record:
@@ -177,34 +230,108 @@ class NativeProcessBackend:
                 return True
 
             pid = record.popen.pid
-            try:
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            except Exception as e:
-                logger.warning("Error terminating process group for PID %d: %s", pid, e)
-                try:
-                    record.popen.terminate()
-                except ProcessLookupError:
-                    pass
-
-            try:
-                record.popen.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                try:
-                    pgid = os.getpgid(pid)
-                    os.killpg(pgid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                except Exception:
-                    record.popen.kill()
-                record.popen.wait(timeout=2.0)
+            self.terminate_process_tree(pid, timeout=timeout)
 
             record.completed_status = JobStatus.CANCELLED
             record.handle.status = JobStatus.CANCELLED
-            logger.info("Stopped process handle %s (PID %d)", handle.handle_id, pid)
+            logger.info("Stopped process tree for handle %s (PID %d)", handle.handle_id, pid)
             return True
+
+    def get_active_process_pids(self) -> Set[int]:
+        """Return set of PIDs and child process PIDs actively managed by this backend."""
+        with self._lock:
+            active_pids: Set[int] = set()
+            for record in self._processes.values():
+                if record.completed_status is None and record.popen.poll() is None:
+                    root_pid = record.popen.pid
+                    active_pids.add(root_pid)
+                    if psutil is not None:
+                        try:
+                            parent = psutil.Process(root_pid)
+                            for child in parent.children(recursive=True):
+                                active_pids.add(child.pid)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+            return active_pids
+
+    def sweep_orphan_processes(self, cuda_backend=None) -> List[int]:
+        """Scan system for orphaned DRIGS/CUDA child processes and terminate them."""
+        active_pids = self.get_active_process_pids()
+        orphan_pids: Set[int] = set()
+
+        if psutil is not None:
+            for proc in psutil.process_iter(['pid', 'ppid', 'name', 'environ']):
+                try:
+                    info = proc.info
+                    pid = info['pid']
+                    ppid = info['ppid']
+                    env = info.get('environ') or {}
+
+                    if "DRIGS_JOB_ID" in env or "DRIGS_WORKER_ID" in env:
+                        if pid not in active_pids:
+                            # Process is tagged with DRIGS but not in active backend state
+                            # Or parent PID is 1 (reparented init) or dead parent
+                            if ppid == 1 or not psutil.pid_exists(ppid) or ppid not in active_pids:
+                                orphan_pids.add(pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+
+        # Check NVML compute running processes if available
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            device_count = pynvml.nvmlDeviceGetCount()
+            for i in range(device_count):
+                dev_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                gpu_procs = pynvml.nvmlDeviceGetComputeRunningProcesses(dev_handle)
+                for gpu_proc in gpu_procs:
+                    gpu_pid = gpu_proc.pid
+                    if gpu_pid not in active_pids and gpu_pid not in orphan_pids:
+                        if psutil is not None and psutil.pid_exists(gpu_pid):
+                            try:
+                                proc = psutil.Process(gpu_pid)
+                                env = proc.environ()
+                                if "DRIGS_JOB_ID" in env or proc.ppid() == 1:
+                                    orphan_pids.add(gpu_pid)
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+
+        swept_pids: List[int] = []
+        for orphan_pid in orphan_pids:
+            logger.warning("Sweeping orphan DRIGS/CUDA process PID %d", orphan_pid)
+            term_pids = self.terminate_process_tree(orphan_pid)
+            swept_pids.extend(term_pids)
+
+        return list(set(swept_pids))
+
+    def start_orphan_sweeper(self, interval: float = 10.0, cuda_backend=None) -> None:
+        """Start background task that periodically sweeps orphan processes."""
+        if self._sweeper_running:
+            return
+        self._sweeper_running = True
+
+        async def _sweeper_loop():
+            while self._sweeper_running:
+                try:
+                    await asyncio.sleep(interval)
+                    if not self._sweeper_running:
+                        break
+                    self.sweep_orphan_processes(cuda_backend=cuda_backend)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error("Error in orphan sweeper loop: %s", e)
+
+        self._sweeper_task = asyncio.create_task(_sweeper_loop())
+
+    def stop_orphan_sweeper(self) -> None:
+        """Stop background orphan sweeper task."""
+        self._sweeper_running = False
+        if self._sweeper_task is not None:
+            self._sweeper_task.cancel()
+            self._sweeper_task = None
 
     def read_logs(self, handle: ExecutionHandle, lines: Optional[int] = None) -> str:
         """Read accumulated log text from handle's output file."""
