@@ -1,0 +1,67 @@
+\section{Pluggable Scheduling \& Mathematical Formulations}
+\label{sec:scheduling}
+
+At the core of DRIGS is a suite of pluggable scheduling policies implementing the \texttt{Scheduler} protocol. Schedulers operate as pure functions over pending workload requests $\mathcal{J}_{\text{pending}}$ and the cluster state snapshot $\mathcal{S}_{\text{cluster}}$. This section presents the formal mathematical formulations and algorithms for the five scheduling policies evaluated in DRIGS.
+
+\subsection{First-In, First-Out (FIFO) Scheduler}
+The baseline \texttt{FIFOScheduler} orders pending jobs strictly by arrival timestamp $t_{\text{submit}}(j)$:
+\begin{equation}
+    j_1 \prec_{\text{FIFO}} j_2 \iff t_{\text{submit}}(j_1) < t_{\text{submit}}(j_2)
+\end{equation}
+While FIFO enforces strict arrival fairness, it suffers from head-of-line (HoL) blocking under heterogeneous arrival streams, as large multi-GPU training jobs stall small, low-resource inference tasks.
+
+\subsection{Priority Scheduler with Starvation Prevention}
+To resolve HoL blocking while preventing low-priority job starvation, \texttt{PriorityScheduler} calculates a dynamic \emph{effective priority} $\text{Priority}_{\text{eff}}(j, t)$ for each job $j$ at current time $t$:
+\begin{equation}
+    \text{Priority}_{\text{eff}}(j, t) = \text{Priority}_{\text{base}}(j) + \alpha \cdot \max\left(0, t - t_{\text{submit}}(j)\right)
+\end{equation}
+where $\text{Priority}_{\text{base}}(j) \in \mathbb{Z}^+$ is the user-specified job priority, $\alpha > 0$ (default $\alpha = 0.01$\,sec$^{-1}$) is the aging boost coefficient, and $(t - t_{\text{submit}}(j))$ is the elapsed queue wait duration in seconds.
+
+Jobs are sorted by decreasing effective priority:
+\begin{equation}
+    j_1 \prec_{\text{Priority}} j_2 \iff \text{Priority}_{\text{eff}}(j_1, t) > \text{Priority}_{\text{eff}}(j_2, t)
+\end{equation}
+Ties are broken by earlier submission time $t_{\text{submit}}$. As pending jobs wait in the queue, their effective priority increases monotonically, guaranteeing that no job suffers indefinite starvation.
+
+\subsection{Memory-Aware Scheduler}
+To eliminate CUDA Out-Of-Memory (OOM) failures under heavy memory saturation, \texttt{MemoryAwareScheduler} queries real-time available VRAM $\text{VRAM}_{\text{free}}(d)$ for each compute device $d \in \mathcal{D}$. A device $d$ is eligible for job $j$ if and only if:
+\begin{equation}
+    \text{VRAM}_{\text{req}}(j) \le \text{VRAM}_{\text{free}}(d)
+\end{equation}
+We define the cluster Placement Efficiency $\eta_{\text{placement}}$ as the ratio of total requested VRAM across active allocations $\mathcal{A}$ to total cluster VRAM capacity:
+\begin{equation}
+    \eta_{\text{placement}} = \frac{\sum_{j \in \mathcal{A}} \text{VRAM}_{\text{req}}(j)}{\sum_{d \in \mathcal{D}} \text{VRAM}_{\text{total}}(d)}
+\end{equation}
+When memory utilization exceeds $90\%$, \texttt{MemoryAwareScheduler} throttles new allocations, re-queueing workloads that exceed free VRAM margins.
+
+\subsection{Gang Scheduler (Atomic Reservation Invariant)}
+Distributed training jobs (e.g., PyTorch DDP) require synchronized multi-GPU execution. Incremental allocation of GPUs can lead to distributed deadlocks if two jobs each acquire a subset of required GPUs and block indefinitely.
+
+\texttt{GangScheduler} enforces an \emph{atomic all-or-nothing reservation invariant}. For a multi-device job $j$ requiring $N_{\text{req}}(j)$ GPUs, the allocation function returns a valid assignment $\mathcal{D}_{\text{gang}}$ if and only if $N_{\text{req}}(j)$ healthy devices are simultaneously available:
+\begin{equation}
+    \text{Allocation}(j) = \begin{cases}
+        \mathcal{C} \subset \mathcal{D}_{\text{avail}}, \, |\mathcal{C}| = N_{\text{req}}(j) & \text{if } |\mathcal{D}_{\text{avail}}| \ge N_{\text{req}}(j) \\
+        \emptyset \quad (\text{Deferred}) & \text{otherwise}
+    \end{cases}
+\end{equation}
+If $|\mathcal{D}_{\text{avail}}| < N_{\text{req}}(j)$, job $j$ remains in the \texttt{QUEUED} state without reserving partial hardware resources.
+
+\subsection{Topology-Aware Scheduler}
+Inter-GPU communication bandwidth varies significantly depending on hardware interconnect hierarchy. \texttt{TopologyAwareScheduler} models host GPU interconnects as a weighted topology graph $G = (\mathcal{D}, E, W)$, where pairwise link weights $W(d_i, d_j)$ represent interconnect bandwidth quality:
+\begin{equation}
+    W(d_i, d_j) = \begin{cases}
+        100 & \text{if NVLink Interconnect} \\
+        50 & \text{if Same PCIe Switch (PXB)} \\
+        20 & \text{if Same Host Bridge (PHB)} \\
+        5 & \text{if Cross-Socket NUMA Interconnect}
+    \end{cases}
+\end{equation}
+For a job requesting a clique of $k = N_{\text{req}}(j)$ GPUs, the Interconnect Placement Quality Score $S_{\text{topo}}(\mathcal{C})$ of candidate GPU subset $\mathcal{C} = \{d_1, d_2, \dots, d_k\}$ is defined as the mean pairwise link weight:
+\begin{equation}
+    S_{\text{topo}}(\mathcal{C}) = \frac{2}{k(k-1)} \sum_{1 \le i < j \le k} W(d_i, d_j)
+\end{equation}
+The optimal placement clique $\mathcal{C}^*$ maximizes the placement score over all valid candidate subsets:
+\begin{equation}
+    \mathcal{C}^* = \arg\max_{\mathcal{C} \subseteq \mathcal{D}_{\text{avail}}, \, |\mathcal{C}| = k} S_{\text{topo}}(\mathcal{C})
+\end{equation}
+By placing distributed PyTorch DDP ranks onto GPU cliques with maximal $S_{\text{topo}}$, DRIGS selects placements designed to reduce collective communication overhead (\texttt{all\_reduce}); the empirical NCCL bandwidth characterisation is reported in Section~\ref{sec:evaluation}.

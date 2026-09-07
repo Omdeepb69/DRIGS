@@ -1,0 +1,24 @@
+\section{Conclusion \& Future Work}
+\label{sec:conclusion}
+
+In this paper, we presented \textbf{DRIGS} (Distributed Resource and Intelligent GPU Scheduling), a lightweight, modular, GPU-aware compute runtime engineered for heterogeneous AI workloads across dynamic GPU infrastructures. DRIGS addresses the key limitations of existing orchestrators through clean domain abstractions, pluggable intelligent scheduling policies, sub-millisecond control-plane rescheduling, and production hardening.
+
+Empirical evaluations on dual NVIDIA Tesla T4 GPU nodes demonstrate that DRIGS's \texttt{PriorityScheduler} reduces P95 queue wait time by \textbf{60.09\%} ($2.740$\,s vs.\ FIFO $6.866$\,s) under Poisson arrival streams. For multi-GPU workloads, \texttt{TopologyAwareScheduler} achieves a \textbf{+22.19\%} improvement in measured topology-quality score ($74.89$ vs.\ $61.29$) over random placement. In fault recovery benchmarks, DRIGS executes pure control-plane rescheduling in \textbf{0.496\,ms} and achieves complete physical end-to-end wall-clock recovery following process \texttt{SIGKILL} termination in \textbf{129.13\,ms}. At high scale ($N=1,000$ jobs queue depth), DRIGS maintains scheduler decision latencies under \textbf{17\,ms} and admission throughput of $81.7$\,jobs/sec. Under 95\% VRAM saturation, DRIGS gracefully throttles placement efficiency to 40.0\% and recovers CUDA OOM exceptions within \textbf{0.021\,ms}.
+
+\subsection{Future Directions}
+Future work on DRIGS will focus on three key areas:
+\begin{enumerate}
+    \item \textbf{Dynamic VRAM Swapping \& Paging:} Integrating host RAM paging drivers to dynamically swap out idle transformer model weights during multi-tenant inference spikes.
+    \item \textbf{Multi-Node NVLink Switch Fabrics:} Extending \texttt{TopologyAwareScheduler} to model NVSwitch fabric topologies across multi-node HGX/DGX supercomputer clusters.
+    \item \textbf{Predictive Arrival Schedulers:} Incorporating Transformer-based arrival prediction models to proactively warm GPU memory contexts ahead of bursty workload queues.
+\end{enumerate}
+
+\subsection*{Limitations}
+The following constraints apply to the experimental results in this paper and should be considered when interpreting the findings.
+\begin{enumerate}
+    \item \textbf{Single-host evaluation.} All experiments are conducted on a two-GPU, single-host configuration. Multi-node distributed scheduling is implemented in DRIGS but not empirically evaluated; that evaluation is future work.
+    \item \textbf{Simulated cluster for topology score experiment.} The topology-quality scores (Experiment B, Table~\ref{tab:topology}) are generated on a synthetic 8-GPU simulated cluster with artificial NVLink/PCIe topology tags. Physical hardware NCCL measurements are reported separately for the 2$\times$T4 testbed.
+    \item \textbf{Single GPU pair for NCCL characterisation.} The physical T4 testbed has only one available GPU pair (PHB tier). No topology-aware vs.\ random NCCL comparison was feasible on physical hardware; the NCCL section characterises the interconnect, not the scheduler's placement impact on communication bandwidth.
+    \item \textbf{Admission throughput vs.\ execution throughput.} The 81.7\,jobs/sec figure measures SQLite control-plane \emph{enqueue} throughput, not end-to-end execution throughput. The scheduler made 4 allocation decisions at $N=1{,}000$; jobs were not fully executed through an accelerator backend.
+\end{enumerate}
+

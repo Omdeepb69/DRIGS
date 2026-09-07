@@ -1,0 +1,38 @@
+\section{Related Work}
+\label{sec:related_work}
+
+GPU resource management and cluster scheduling for machine learning have been actively researched across high-performance computing (HPC), cloud-native container orchestration, and distributed ML frameworks. This section provides a comparative analysis of DRIGS against existing systems.
+
+\subsection{HPC Batch Schedulers (Slurm, LSF)}
+Slurm~\cite{slurm} and IBM LSF are traditional HPC workload managers designed primarily for static CPU batch jobs. Although modern Slurm extensions support GPU generic resources (\texttt{GRES}), Slurm allocates GPUs as static integer quantities (e.g., \texttt{--gpus=2}) without monitoring real-time VRAM utilization or VRAM fragmentation. Furthermore, Slurm requires complex system-level daemon installation with root privileges, rendering it unsuitable for ephemeral notebook environments (e.g., Kaggle, Google Colab). In contrast, DRIGS provides fine-grained VRAM telemetry, zero-root native execution, and sub-millisecond control-plane rescheduling (\textbf{0.496\,ms}).
+
+\subsection{Cloud-Native Container Orchestrators (Kubernetes, Volcano)}
+Kubernetes (K8s)~\cite{kubernetes} has become the standard orchestrator for containerized microservices. K8s device plugins (e.g., NVIDIA GPU Device Plugin) expose GPUs as discrete integer resources (\texttt{nvidia.com/gpu}). Systems like Volcano~\cite{volcano} extend K8s with gang scheduling and queue management. However, K8s orchestrators incur significant scheduling overheads (often $>500$\,ms per pod), rely on heavy etcd state storage, and lack interconnect topology scoring across PCIe switches and NVLink cliques. DRIGS achieves an order-of-magnitude lower decision latency ($<17$\,ms at $N=1,000$ jobs) while embedding native topology graph scoring ($S_{\text{topo}}$) directly into placement decisions.
+
+\subsection{Distributed ML Schedulers (Ray, Horovod, Alpa)}
+Frameworks such as Ray~\cite{ray}, Horovod~\cite{horovod}, and Alpa~\cite{alpa} focus on task-parallel execution and model-parallel tensor placement. Ray provides dynamic actor placement but delegates process failure recovery to application-level code. DRIGS complements these execution engines by operating as a resilient, topology-aware control plane that enforces atomic gang reservations, prevents CUDA OOM crashes via real-time VRAM tracking, and recovers hard process failures within \textbf{129.13\,ms}.
+
+\subsection{Comparative Summary}
+Table~\ref{tab:related_work} summarizes the architectural capabilities of DRIGS relative to major cluster scheduling paradigms. Rescheduling latency entries for third-party systems are qualitative order-of-magnitude characterizations based on their architectural designs~\cite{slurm,kubernetes,ray}, not direct benchmarks performed by the authors.
+
+\begin{table*}[htbp]
+\centering
+\caption{System Feature Comparison Across Cluster Orchestrators and GPU Schedulers.
+  $\dagger$~Qualitative, order-of-magnitude characterization based on system architecture; not directly benchmarked by the authors.}
+\label{tab:related_work}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Feature / Capability} & \textbf{Slurm} & \textbf{K8s / Volcano} & \textbf{Ray} & \textbf{Alpa} & \textbf{DRIGS (Ours)} \\
+\midrule
+Real-Time GPU VRAM Telemetry          & No          & No             & Partial       & No      & \textbf{Yes (NVML)}      \\
+Interconnect Topology Scoring         & No          & No             & No            & Static  & \textbf{Yes (PCIe/NVLink)} \\
+Atomic Multi-GPU Gang Scheduling      & Optional    & Yes (Volcano)  & Actor-based   & Yes     & \textbf{Yes (Native)}    \\
+Sub-ms Rescheduling Latency$\dagger$  & No (s-scale)& No (100s ms)   & No (10s--100s ms) & N/A & \textbf{Yes (0.496 ms)} \\
+Zero-Root Native Execution            & No          & No             & Yes           & Yes     & \textbf{Yes}             \\
+ACID State Persistence                & File-based  & etcd           & In-memory     & N/A     & \textbf{Yes (SQLite)}    \\
+Automated NVML Orphan Sweeper         & No          & No             & No            & No      & \textbf{Yes}             \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+

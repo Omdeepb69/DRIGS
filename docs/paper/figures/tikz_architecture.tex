@@ -1,0 +1,189 @@
+\documentclass[tikz,border=15pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
+
+\begin{document}
+\sffamily
+
+% Palette
+\definecolor{navybg}{HTML}{0F172A}
+\definecolor{slateborder}{HTML}{64748B}
+\definecolor{cpbg}{HTML}{F8FAFC}
+\definecolor{cpbox}{HTML}{FFFFFF}
+\definecolor{cpstroke}{HTML}{4338CA}
+\definecolor{wnbg}{HTML}{F0F9FF}
+\definecolor{wnstroke}{HTML}{0284C7}
+\definecolor{exbg}{HTML}{F0FDF4}
+\definecolor{exstroke}{HTML}{16A34A}
+\definecolor{sqlbg}{HTML}{FFF1F2}
+\definecolor{sqlstroke}{HTML}{E11D48}
+\definecolor{restbg}{HTML}{FFFBEB}
+\definecolor{reststroke}{HTML}{D97706}
+
+\begin{tikzpicture}[
+    node distance=0.5cm and 0.25cm,
+    >=Stealth,
+    box/.style={
+        draw=cpstroke,
+        fill=cpbox,
+        thick,
+        rounded corners=3pt,
+        align=center,
+        inner sep=4pt,
+        font=\sffamily\footnotesize,
+        minimum height=1.1cm
+    },
+    arr/.style={->, >=Stealth, thick, color=navybg},
+    dasharr/.style={->, >=Stealth, thick, dashed, color=wnstroke}
+]
+
+% ══════════════════════════════════════════════════════════════════════════════
+% LAYER 1: CONTROL PLANE (7 Horizontal Cards)
+% ══════════════════════════════════════════════════════════════════════════════
+
+\node[box, fill=restbg, draw=reststroke, minimum width=1.8cm] (rest) {
+    \textbf{REST API}\\
+    \scriptsize CLI / Gateway\\
+    \tiny\texttt{POST /v1/jobs}
+};
+
+\node[box, right=0.25cm of rest, minimum width=1.8cm] (adm) {
+    \textbf{Admission Ctrl}\\
+    \scriptsize Auth \& Quota\\
+    \tiny Schema Check
+};
+
+\node[box, right=0.25cm of adm, minimum width=1.8cm] (queue) {
+    \textbf{Job Queue}\\
+    \scriptsize Priority / DRF\\
+    \tiny FIFO Queues
+};
+
+\node[box, right=0.25cm of queue, minimum width=2.1cm] (sched) {
+    \textbf{Scheduler Core}\\
+    \scriptsize Pluggable Policies\\
+    \tiny Gang · DRF · Topo
+};
+
+\node[box, right=0.25cm of sched, minimum width=1.9cm] (reg) {
+    \textbf{Worker Registry}\\
+    \scriptsize Node Heartbeats\\
+    \tiny State Snapshot
+};
+
+\node[box, right=0.25cm of reg, minimum width=1.9cm] (fail) {
+    \textbf{Failure Detector}\\
+    \scriptsize Rescheduler Ctrl\\
+    \tiny Zombie Sweeper
+};
+
+\node[box, right=0.25cm of fail, fill=sqlbg, draw=sqlstroke, minimum width=1.8cm] (sql) {
+    \textbf{SQLite Store}\\
+    \scriptsize ACID Engine\\
+    \tiny WAL Persistence
+};
+
+% Pipeline Arrows
+\draw[arr] (rest) -- (adm);
+\draw[arr] (adm) -- (queue);
+\draw[arr] (queue) -- (sched);
+\draw[arr] (sched) -- (reg);
+\draw[arr] (reg) -- (fail);
+\draw[arr] (fail) -- (sql);
+
+% Control Plane Container
+\begin{scope}[on background layer]
+    \node[draw=slateborder, fill=cpbg, thick, rounded corners=5pt, fit=(rest) (sql), inner ysep=16pt, inner xsep=8pt] (cp_container) {};
+\end{scope}
+\node[fill=navybg, text=white, font=\sffamily\bfseries\scriptsize, rounded corners=2pt, inner sep=3pt, anchor=south west] 
+    at ($(cp_container.north west)+(4pt, -12pt)$) { CONTROL PLANE LAYER };
+
+% ══════════════════════════════════════════════════════════════════════════════
+% LAYER 2: WORKER NODES (3 Cards Distributed Width)
+% ══════════════════════════════════════════════════════════════════════════════
+
+% Position Worker 0 under Admission/JobQueue, Worker 1 under Scheduler, Worker M-1 under Failure/SQLite
+\node[box, draw=wnstroke, below=1.8cm of adm.south west, anchor=north west, minimum width=4.0cm, minimum height=1.2cm] (w0) {
+    \textbf{Worker Agent Node 0}\\[2pt]
+    \scriptsize NVML Telemetry Engine · Local Process Guard\\
+    \tiny\texttt{CUDA\_VISIBLE\_DEVICES} Isolation
+};
+
+\node[box, draw=wnstroke, right=0.8cm of w0, minimum width=4.0cm, minimum height=1.2cm] (w1) {
+    \textbf{Worker Agent Node 1}\\[2pt]
+    \scriptsize NVML Telemetry Engine · Local Process Guard\\
+    \tiny\texttt{CUDA\_VISIBLE\_DEVICES} Isolation
+};
+
+\node[right=0.4cm of w1, font=\bfseries\Large, text=wnstroke] (dots) {$\cdots$};
+
+\node[box, draw=wnstroke, right=0.4cm of dots, minimum width=4.0cm, minimum height=1.2cm] (wm) {
+    \textbf{Worker Agent Node $M-1$}\\[2pt]
+    \scriptsize NVML Telemetry Engine · Local Process Guard\\
+    \tiny\texttt{CUDA\_VISIBLE\_DEVICES} Isolation
+};
+
+% Worker Container
+\begin{scope}[on background layer]
+    \node[draw=wnstroke!60, fill=wnbg, thick, rounded corners=5pt, fit=(w0) (wm), inner ysep=16pt, inner xsep=8pt] (wn_container) {};
+\end{scope}
+\node[fill=wnstroke, text=white, font=\sffamily\bfseries\scriptsize, rounded corners=2pt, inner sep=3pt, anchor=south west] 
+    at ($(wn_container.north west)+(4pt, -12pt)$) { WORKER NODE LAYER ($M$ Distributed Nodes) };
+
+% ══════════════════════════════════════════════════════════════════════════════
+% LAYER 3: EXECUTION LAYER (3 Drivers Aligned with Workers)
+% ══════════════════════════════════════════════════════════════════════════════
+
+\node[box, draw=exstroke, below=1.6cm of w0.south west, anchor=north west, minimum width=4.0cm, minimum height=1.2cm] (ex0) {
+    \textbf{NativeProcessBackend}\\[2pt]
+    \scriptsize Subprocess Driver \& Process Tree Guard\\
+    \tiny\texttt{psutil} Child Process Teardown
+};
+
+\node[box, draw=exstroke, below=1.6cm of w1.south west, anchor=north west, minimum width=4.0cm, minimum height=1.2cm] (ex1) {
+    \textbf{DockerBackend}\\[2pt]
+    \scriptsize Containerized Runtime Driver\\
+    \tiny\texttt{nvidia-docker} Isolation \& Mounts
+};
+
+\node[box, draw=exstroke, below=1.6cm of wm.south west, anchor=north west, minimum width=4.0cm, minimum height=1.2cm] (ex2) {
+    \textbf{DistributedBackend}\\[2pt]
+    \scriptsize Multi-Node Gang Synchronization\\
+    \tiny PyTorch DDP / \texttt{torchrun} Gang Core
+};
+
+% Execution Container
+\begin{scope}[on background layer]
+    \node[draw=exstroke!60, fill=exbg, thick, rounded corners=5pt, fit=(ex0) (ex2), inner ysep=16pt, inner xsep=8pt] (ex_container) {};
+\end{scope}
+\node[fill=exstroke, text=white, font=\sffamily\bfseries\scriptsize, rounded corners=2pt, inner sep=3pt, anchor=south west] 
+    at ($(ex_container.north west)+(4pt, -12pt)$) { EXECUTION LAYER (Pluggable Drivers) };
+
+% ══════════════════════════════════════════════════════════════════════════════
+% INTER-LAYER CONNECTIONS (100% Non-Overlapping Paths)
+% ══════════════════════════════════════════════════════════════════════════════
+
+% CP -> Worker 0 (Job Allocation)
+\draw[arr] ($(queue.south)!0.5!(adm.south)$) -- (w0.north) 
+    node[midway, fill=white, inner sep=2pt, font=\tiny\bfseries, draw=navybg!40, rounded corners=2pt] {Job Allocation};
+
+% CP -> Worker 1 (State Command)
+\draw[arr] (sched.south) -- (w1.north) 
+    node[midway, fill=white, inner sep=2pt, font=\tiny\bfseries, draw=navybg!40, rounded corners=2pt] {Scheduler Command};
+
+% Worker M-1 -> Worker Registry (Heartbeats)
+\draw[dasharr] (wm.north) -- (reg.south) 
+    node[midway, fill=white, inner sep=2pt, font=\tiny\bfseries\ttfamily, text=wnstroke, draw=wnstroke!40, rounded corners=2pt] {POST /v1/workers (15s Heartbeat)};
+
+% Worker -> Execution Layer
+\draw[arr, color=exstroke] (w0.south) -- (ex0.north) 
+    node[midway, fill=white, inner sep=1.5pt, font=\tiny\bfseries, text=exstroke, draw=exstroke!40, rounded corners=2pt] {Subprocess};
+
+\draw[arr, color=exstroke] (w1.south) -- (ex1.north) 
+    node[midway, fill=white, inner sep=1.5pt, font=\tiny\bfseries, text=exstroke, draw=exstroke!40, rounded corners=2pt] {Container};
+
+\draw[arr, color=exstroke] (wm.south) -- (ex2.north) 
+    node[midway, fill=white, inner sep=1.5pt, font=\tiny\bfseries, text=exstroke, draw=exstroke!40, rounded corners=2pt] {Gang Sync};
+
+\end{tikzpicture}
+\end{document}

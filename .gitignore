@@ -1,77 +1,124 @@
-# Byte-compiled / optimized / DLL files
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
 *.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+.installed.cfg
 MANIFEST
 
-# Pytest / Coverage / Tooling
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env
+.python-version
+
+# ── Type checking & linting ────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+
+# ── Testing ────────────────────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
-.nox/
-.tox/
-.hypothesis/
+coverage.xml
+*.cover
+*.log
+nosetests.xml
+test-results/
 
-# Virtual environments
-venv/
-.venv/
-env/
-.env/
-ENV/
+# ── Jupyter ────────────────────────────────────────────────────────────────────
+.ipynb_checkpoints
+*.ipynb
 
-# IDE / Editor settings
+# ── GPU / CUDA ─────────────────────────────────────────────────────────────────
+*.ptx
+*.cubin
+*.fatbin
+
+# ── PyTorch / ML artifacts ────────────────────────────────────────────────────
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+checkpoints/
+runs/
+wandb/
+mlruns/
+lightning_logs/
+
+# ── LaTeX build artifacts ──────────────────────────────────────────────────────
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.synctex.gz
+*.toc
+*.xdv
+tikz_test.*
+
+# ── Data & results ─────────────────────────────────────────────────────────────
+*.csv
+*.tsv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+kaggle_results/
+benchmark_results/
+experiment_outputs/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+
+# ── Editors & IDEs ────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
 
-# Temporary files & checkpoints
-drigs_checkpoints/
-tmp/
-kaggle_results/
-paper_outputs/
-DRIGS_benchmark_results/
-*.zip
-
-# Project metadata & agent orchestration files
-AGENTS.md
+# ── Agent / project management (internal, not for public consumption) ──────────
 PROJECT_PLAN.md
-ARCHITECTURE.md
 LESSONS.md
 LEARNING.md
-.agents/rules/01-large-tasks.md
-.agents/rules/00-engineering.md
-.agents/skills/README.md
-.agents/workflows/plan-project.md
-.agents/workflows/implement-task.md
-.agents/workflows/learn.md
-.agents/workflows/ask.md
-.agents/workflows/cap.md
-.agents/workflows/red-team.md
-.agents/workflows/brainstorm.md
-.agents/workflows/continue-project.md
-.agents/workflows/critic.md
-.agents/workflows/investigate.md
+.agents/
+
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+.env
+*.pem
+*.key
+secrets.yaml
+secrets.json
+
+# Large binary archives
+*.zip
+DRIGS_benchmark_results/

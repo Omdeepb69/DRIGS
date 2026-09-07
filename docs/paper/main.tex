@@ -1,0 +1,68 @@
+\documentclass[10pt,twocolumn,a4paper]{article}
+
+\usepackage[margin=0.75in,columnsep=0.25in]{geometry}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+
+% Typography
+\titleformat{\section}{\normalsize\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\small\bfseries}{\thesubsection}{1em}{}
+
+% Header / footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small DRIGS: Distributed Resource and Intelligent GPU Scheduling}
+\lhead{\small Borkar, 2026}
+\cfoot{\thepage}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+% arXiv metadata:
+% Primary category: cs.DC (Distributed, Parallel, and Cluster Computing)
+% Cross-list: cs.LG (Machine Learning), cs.PF (Performance)
+
+\begin{document}
+
+% Title and abstract span both columns via \twocolumn[...]
+\twocolumn[{%
+\begin{center}
+  {\large\bfseries DRIGS: Distributed Resource and Intelligent GPU Scheduling\\
+  for Heterogeneous AI Workloads}\par\vspace{0.5em}
+  Omdeep Borkar\\
+  {\small Independent Researcher, Goa, India\\
+  \href{mailto:omdeepborkar@gmail.com}{omdeepborkar@gmail.com}}\par\vspace{0.5em}
+\end{center}
+\input{abstract}
+\vspace{1em}
+}]
+\thispagestyle{fancy}
+
+\input{introduction}
+
+\input{architecture}
+
+\input{scheduling}
+
+\input{evaluation}
+
+\input{related_work}
+
+\input{conclusion}
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+\end{document}

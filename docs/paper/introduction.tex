@@ -1,0 +1,35 @@
+\section{Introduction}
+\label{sec:introduction}
+
+The rapid evolution of deep learning has led to an explosion in compute requirements across model training, fine-tuning, and real-time inference. Modern AI workloads encompass diverse model architectures—ranging from vision models (e.g., ResNet-50) and Transformer encoder models (e.g., DistilBERT) to large generative AI models—operating across highly heterogeneous hardware environments. Distributed training requires tight multi-GPU synchronization via Collective Communications Libraries (e.g., NCCL), whereas inference servers require low-latency queueing and fine-grained VRAM isolation.
+
+Despite significant hardware advancements, cluster resource management remains a major bottleneck in AI infrastructure. Traditional high-performance computing (HPC) schedulers such as Slurm were originally designed for monolithic CPU batch jobs, lacking fine-grained real-time GPU telemetry, interconnect topology awareness, and dynamic checkpoint recovery. Conversely, cloud-native container orchestrators like Kubernetes (K8s) rely on static resource requests (e.g., \texttt{nvidia.com/gpu: 1}), treating GPUs as opaque, indivisible tokens without accounting for VRAM fragmentation, PCIe switch topologies, or inter-GPU NVLink bandwidth.
+
+\subsection{Key Challenges in Heterogeneous GPU Orchestration}
+Managing modern GPU clusters presents four fundamental system challenges:
+
+\begin{enumerate}
+    \item \textbf{Queue Head-of-Line Blocking and High Tail Latency:} Simple First-In, First-Out (FIFO) queueing policies suffer from head-of-line (HoL) blocking when long-running multi-GPU training jobs stall short, high-priority inference tasks, causing severe queue wait latency inflation.
+    \item \textbf{Topology-Blind Placement Degradation:} Distributed training (e.g., PyTorch Distributed Data Parallel) depends heavily on inter-GPU communication bandwidth. Suboptimal GPU placement across distant PCIe host bridges or NUMA nodes severely degrades collective synchronization throughput (\texttt{all\_reduce}).
+    \item \textbf{Resource Fragmentation and Memory Saturation:} Coarse GPU allocations lead to severe VRAM fragmentation. When GPU memory saturation reaches critical thresholds ($\ge 90\%$), uncoordinated job submission causes CUDA Out-Of-Memory (OOM) crashes, process termination, and orphan GPU memory leaks.
+    \item \textbf{High Overhead Fault Recovery:} When hardware or worker nodes fail, traditional schedulers incur multi-second timeouts before re-queueing jobs, leading to wasted GPU compute cycles and extended downtime.
+\end{enumerate}
+
+\subsection{The DRIGS Solution}
+To address these challenges, we introduce \textbf{DRIGS} (Distributed Resource and Intelligent GPU Scheduling), a lightweight, modular, production-oriented distributed compute runtime designed specifically for heterogeneous AI workloads. DRIGS provides a decoupled architecture with pluggable abstractions, supporting native process execution, containerized runtimes, dynamic remote worker registration, and SQLite ACID control-plane state persistence.
+
+\subsection{Key Contributions}
+The primary contributions of this paper are summarized as follows:
+
+\begin{itemize}
+    \item \textbf{Decoupled Domain Abstractions:} We propose a clean architectural framework separating hardware discovery (\texttt{HardwareBackend}), policy scheduling (\texttt{Scheduler}), resource management (\texttt{ResourceManager}), and process execution (\texttt{ExecutionBackend}), enabling native execution without root privileges or Docker requirements.
+    \item \textbf{Pluggable Intelligent Schedulers:} We implement and empirically evaluate five scheduling policies: \texttt{FIFOScheduler}, \texttt{PriorityScheduler} (with starvation-prevention aging), \texttt{MemoryAwareScheduler}, \texttt{GangScheduler} (atomic multi-device reservation), and \texttt{TopologyAwareScheduler} (PCIe switch topology clique optimization).
+    \item \textbf{Sub-Millisecond Control-Plane Rescheduling \& Fast Fault Recovery:} We design an automated failure detection and checkpoint recovery subsystem that executes control-plane rescheduling in \textbf{0.496\,ms} and achieves complete physical end-to-end wall-clock recovery in \textbf{129.13\,ms} following physical process SIGKILL termination.
+    \item \textbf{Production Hardening \& Orphan Process Sweeper:} We introduce an async non-blocking REST API control plane, SQLite persistent storage engine, HMAC Bearer token authentication, and a recursive NVML process sweeper that eliminates zombie GPU memory allocations.
+    \item \textbf{Empirical Evaluation on Real Accelerators:} We conduct multi-trial empirical benchmarks on dual NVIDIA Tesla T4 GPUs, demonstrating a \textbf{60.09\%} reduction in P95 queue wait time under uniform inter-arrival workloads and a \textbf{+22.19\%} interconnect topology score improvement over random placement.
+\end{itemize}
+
+\noindent\textbf{Research Question.} We ask: \emph{do different GPU scheduling objectives (tail latency, memory safety, topology placement quality, and control-plane scalability) require fundamentally different scheduling policies, and can a single modular substrate empirically characterise these trade-offs under identical workloads?} DRIGS is designed and evaluated to answer this question.
+
+\subsection{Paper Organization}
+The remainder of this paper is structured as follows: Section~\ref{sec:architecture} details the DRIGS system architecture and control plane components. Section~\ref{sec:scheduling} presents the mathematical formulations and algorithms for DRIGS's pluggable schedulers. Section~\ref{sec:evaluation} presents comprehensive empirical benchmark results on dual T4 GPU hardware. Section~\ref{sec:related_work} reviews related work in cluster orchestration and GPU scheduling. Section~\ref{sec:conclusion} concludes the paper and discusses future directions.
