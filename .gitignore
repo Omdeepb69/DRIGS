@@ -51,6 +51,10 @@ ENV/
 # Temporary files & checkpoints
 drigs_checkpoints/
 tmp/
+kaggle_results/
+paper_outputs/
+DRIGS_benchmark_results/
+*.zip
 
 # Project metadata & agent orchestration files
 AGENTS.md
