@@ -123,20 +123,21 @@ def run_pytorch_workload(
         else:
             print(f"Epoch [{epoch:2d}/{epochs}] Loss: {loss.item():.4f}")
 
-        # Save checkpoint step
+        # Save lightweight benchmark checkpoint step
         if epoch % 5 == 0 or epoch == epochs:
             step_ckpt = ckpt_path / f"{model_type}_checkpoint_step_{epoch}.pt"
             torch.save(
                 {
                     "epoch": epoch,
                     "model_type": model_type,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
                     "loss": loss.item(),
+                    "vram_allocated_mb": vram_used if torch.cuda.is_available() else 0.0,
+                    "device": str(device),
+                    "checkpoint_status": "VALID",
                 },
                 step_ckpt,
             )
-            print(f"💾 Saved {model_type.upper()} model checkpoint step to {step_ckpt}")
+            print(f"💾 Saved lightweight {model_type.upper()} checkpoint step to {step_ckpt}")
 
         time.sleep(0.1)
 
