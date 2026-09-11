@@ -51,9 +51,9 @@ Inter-GPU communication bandwidth varies significantly depending on hardware int
 \begin{equation}
     W(d_i, d_j) = \begin{cases}
         100 & \text{if NVLink Interconnect} \\
-        50 & \text{if Same PCIe Switch (PXB)} \\
-        20 & \text{if Same Host Bridge (PHB)} \\
-        5 & \text{if Cross-Socket NUMA Interconnect}
+        50  & \text{if Same PCIe Switch (PXB)} \\
+        50  & \text{if Same Host Bridge (PHB)} \\
+        5   & \text{if Cross-Socket NUMA Interconnect}
     \end{cases}
 \end{equation}
 For a job requesting a clique of $k = N_{\text{req}}(j)$ GPUs, the Interconnect Placement Quality Score $S_{\text{topo}}(\mathcal{C})$ of candidate GPU subset $\mathcal{C} = \{d_1, d_2, \dots, d_k\}$ is defined as the mean pairwise link weight:

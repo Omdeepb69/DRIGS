@@ -106,10 +106,13 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 
+# ── Markdown files (ignore all except README.md) ─────────────────────────────
+*.md
+**/*.md
+!README.md
+!**/README.md
+
 # ── Agent / project management (internal, not for public consumption) ──────────
-PROJECT_PLAN.md
-LESSONS.md
-LEARNING.md
 .agents/
 
 # ── Secrets & credentials ─────────────────────────────────────────────────────
@@ -122,3 +125,4 @@ secrets.json
 # Large binary archives
 *.zip
 DRIGS_benchmark_results/
+

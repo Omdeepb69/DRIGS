@@ -5,10 +5,31 @@ To evaluate the performance, scalability, and resilience of DRIGS, we conduct co
 
 Although DRIGS supports multi-node worker registration through its HTTP control plane, the empirical evaluation in this section focuses on a two-GPU single-host configuration. Consequently, these experiments evaluate multi-GPU scheduling rather than multi-node distributed scheduling; multi-node evaluation is left as future work.
 
+Table~\ref{tab:experiment_matrix} provides an overview of the evaluation design.
+
+\begin{table*}[htbp]
+\centering
+\caption{Experiment Matrix: Hardware, Scale, Trial Count, and Primary Metric}
+\label{tab:experiment_matrix}
+\begin{tabular}{llrrl}
+\toprule
+\textbf{Experiment} & \textbf{Hardware} & \textbf{Scale} & \textbf{Trials} & \textbf{Primary Metric} \\
+\midrule
+A: Scheduling Policy   & 2$\times$T4 (physical) & 15 jobs/trial & 5 & P95 queue wait (s) \\
+B: Topology Placement  & Simulated 8-GPU        & All 2-GPU subsets & 1 & Mean topology score \\
+C: NCCL Bandwidth      & 2$\times$T4 (physical) & 1\,MB--512\,MB    & 50\,iters & Effective BW (GB/s) \\
+D: Fault Recovery      & 2$\times$T4 (physical) & 1\,\texttt{SIGKILL} & 1 & End-to-end latency (ms) \\
+E: Queue Depth Scaling & Control plane only     & $N=100/500/1{,}000$ & 1 & Decision latency (ms) \\
+F: VRAM Saturation     & 2$\times$T4 (physical) & 5 jobs @ 85/90/95\% & 1 & Completion rate / OOM \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+
 \subsection{Experimental Setup \& Accelerators}
 Experiments are conducted on dual NVIDIA Tesla T4 GPU nodes ($15.0$\,GB GDDR6 VRAM per GPU) connected via \textbf{PCIe Gen3 x16} (not NVLink — T4s in this deployment share a PCIe host bridge but have no NVLink fabric) running Linux kernel 5.15 and CUDA 12.2. The topology-aware scheduler exercises PCIe bandwidth-tier scoring (PXB/PHB levels); the NVLink=100 scoring branch is implemented but not exercised on this testbed. Benchmark workloads encompass:
 \begin{enumerate}
-    \item \textbf{Synthetic AI Workloads:} Uniform inter-arrival traces ($N=15$ jobs/trial, inter-arrival interval $\sim\mathcal{U}(0.5, 2.0)$\,s) simulating short-duration inference tasks and long-running multi-GPU training jobs.
+    \item \textbf{Synthetic AI Workloads (Experiment A):} Uniform inter-arrival traces ($N=15$ jobs/trial, inter-arrival interval $\sim\mathcal{U}(0.5, 2.0)$\,s). Each job's workload type is drawn uniformly from six templates (ResNet-50, BERT-large, LLaMA-7B inference, LLaMA-70B distributed, Stable Diffusion XL, GNN); GPU count from $\{1,2,4\}$ (note: 4-GPU requests are included in synthetic traces to exercise insufficient-resource queueing and gang-reservation behavior; such requests remain queued on the two-GPU physical testbed and test head-of-line blocking under unmet requirements); VRAM request from $\{4,8,12,16,24\}$\,GB; job duration from $\mathcal{U}(1.0, 10.0)$\,s; job base priority from $\mathcal{U}_{\mathbb{Z}}(0, 10)$. Seeds are fixed per trial (base seed 42; trial $i$: $42 + 1000i$) covering all random draws.
     \item \textbf{Transformer Encoder Model:} Fine-tuning runs using DistilBERT (a Transformer Encoder Model) on PyTorch.
     \item \textbf{Vision Models:} ResNet-50 deep neural network training via PyTorch Distributed Data Parallel (DDP).
 \end{enumerate}
@@ -18,7 +39,7 @@ Table~\ref{tab:schedulers} presents the comparative performance of DRIGS's five 
 
 \begin{table*}[htbp]
 \centering
-\caption{Comparative Performance of DRIGS Scheduling Policies under Synthetic AI Workloads ($N=125$ Jobs, 5 Independent Trials, Mean $\pm$ Std Dev)}
+\caption{Comparative Performance of DRIGS Scheduling Policies under Synthetic AI Workloads ($N=15$ jobs/trial, 5 independent trials; mean $\pm$ standard deviation)}
 \label{tab:schedulers}
 \begin{tabular}{lcccc}
 \toprule
@@ -26,14 +47,14 @@ Table~\ref{tab:schedulers} presents the comparative performance of DRIGS's five 
 \midrule
 FIFO              & $0.595 \pm 0.043$ & $0.856 \pm 0.602$ & 6.866 & 52.48\% \\
 \textbf{Priority} & $\mathbf{0.596 \pm 0.034}$ & $\mathbf{0.570 \pm 0.573}$ & \textbf{2.740} & 52.90\% \\
-BestFit           & $0.610 \pm 0.089$ & $0.842 \pm 0.668$ & 6.041 & 54.77\% \\
+GangScheduler     & $0.610 \pm 0.089$ & $0.842 \pm 0.668$ & 6.041 & 54.77\% \\
 MemoryAware       & $0.567 \pm 0.086$ & $1.066 \pm 0.865$ & 7.120 & 55.18\% \\
 TopologyAware     & $0.562 \pm 0.040$ & $0.796 \pm 0.390$ & 5.481 & 52.09\% \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-As shown in Table~\ref{tab:schedulers}, \texttt{PriorityScheduler} (with starvation-prevention aging, $\alpha=0.05$) achieves a \textbf{60.09\% reduction in P95 queue wait time} ($2.740$\,s vs.\ FIFO $6.866$\,s) and reduces mean queue wait latency from $0.856$\,s to $0.570$\,s. By aging waiting jobs, \texttt{PriorityScheduler} reduces head-of-line blocking without sacrificing overall system throughput ($0.596$\,jobs/sec). The full per-job wait distribution is shown in Figure~\ref{fig:scheduler_cdf}. Note: Table~\ref{tab:schedulers} reports the \emph{mean of per-trial P95 values} across 5 trials; Figure~\ref{fig:scheduler_cdf} reports the \emph{pooled 95th-percentile} across all 75 jobs. Because percentile aggregation is non-linear, these two estimators differ.
+As shown in Table~\ref{tab:schedulers}, \texttt{PriorityScheduler} (with starvation-prevention aging, $\alpha=0.05$) achieves a \textbf{60.09\% reduction in P95 queue wait time} ($2.740$\,s vs.\ FIFO $6.866$\,s) and reduces mean queue wait latency from $0.856$\,s to $0.570$\,s. By aging waiting jobs, \texttt{PriorityScheduler} reduces head-of-line blocking without reducing measured overall throughput ($0.596$\,jobs/sec vs.\ $0.595$\,jobs/sec for FIFO). The full per-job wait distribution is shown in Figure~\ref{fig:scheduler_cdf}. Note: Table~\ref{tab:schedulers} reports the \emph{mean of per-trial P95 values} across 5 trials; Figure~\ref{fig:scheduler_cdf} reports the \emph{pooled 95th-percentile} across all 75 jobs. Because percentile aggregation is non-linear, these two estimators differ.
 
 \begin{figure*}[t]
 \centering
@@ -60,11 +81,11 @@ FIFO & 72.67 / 100.0 & +18.57\% \\
 \end{tabular}
 \end{table}
 
-\texttt{TopologyAwareScheduler} achieves a \textbf{+22.19\% improvement in measured topology-quality score} ($74.89$ vs.\ $61.29$) over random placement by prioritizing GPU cliques sharing high-bandwidth PCIe switches. To ground this score in hardware reality, we additionally measured NCCL communication performance directly on the testbed (2$\times$T4, PHB-tier PCIe, topology score = 50/100). Table~\ref{tab:nccl} and Figure~\ref{fig:nccl_bandwidth} report allreduce latency and effective bandwidth across four message sizes.
+\texttt{TopologyAwareScheduler} achieves a \textbf{22.19\% higher topology-quality score} ($74.89$ vs.\ $61.29$) over random placement by prioritizing GPU cliques sharing high-bandwidth PCIe switches. To ground this score in hardware reality, we additionally measured NCCL communication performance directly on the testbed (2$\times$T4, PHB-tier PCIe, topology score = 50/100). The benchmark executes \texttt{dist.all\_reduce} (\texttt{ReduceOp.SUM}, \texttt{float32}) across message sizes $\{1, 10, 100, 512\}$\,MB using 5 warmup iterations followed by 50 timed iterations; bandwidth is computed as the ring-allreduce algorithmic bandwidth $B = \frac{2(n-1)}{n} \cdot \frac{S}{t}$ where $n=2$ is the world size, $S$ is message size, and $t$ is mean per-iteration latency. Table~\ref{tab:nccl} and Figure~\ref{fig:nccl_bandwidth} report allreduce latency and algorithmic bandwidth across the four message sizes.
 
 \begin{table}[htbp]
 \centering
-\caption{NCCL AllReduce Latency and Effective Bandwidth on T4 PHB Interconnect (2 GPUs, 50 iterations)}
+\caption{NCCL AllReduce Algorithmic Bandwidth on T4 PHB Interconnect (2 GPUs, 50 timed iterations, 5 warmup; \texttt{float32} SUM reduction; ring-allreduce formula: $B = \frac{2(n-1)}{n} \cdot \frac{S}{t}$)}
 \label{tab:nccl}
 \begin{tabular}{rcc}
 \toprule
@@ -78,7 +99,7 @@ FIFO & 72.67 / 100.0 & +18.57\% \\
 \end{tabular}
 \end{table}
 
-Effective bandwidth saturates at \textbf{3.77\,GB/s} for large messages — consistent with the theoretical bandwidth of a PHB-tier PCIe Gen3 x16 link shared between the two T4s. DDP ResNet-18 training achieves \textbf{347.2\,imgs/sec} at a mean step latency of \textbf{92.2\,ms}. These measurements confirm that the DRIGS topology-quality score correctly identifies the PHB interconnect tier (score=50) as a mid-bandwidth interconnect — above a cross-NUMA SYS link (score=10) but below an NVLink fabric (score=100).
+Algorithmic bandwidth saturates at \textbf{3.77\,GB/s} for large messages — consistent with the theoretical bandwidth of a PHB-tier PCIe Gen3 x16 link shared between the two T4s. DDP ResNet-18 training achieves \textbf{347.2\,imgs/sec} at a mean step latency of \textbf{92.2\,ms}. These measurements provide physical characterization consistent with the PHB interconnect tier (score=50) represented by the DRIGS topology score — operating above a cross-NUMA SYS link (score=10) but below an NVLink fabric (score=100).
 
 \begin{figure}[htbp]
 \centering
@@ -88,8 +109,8 @@ Effective bandwidth saturates at \textbf{3.77\,GB/s} for large messages — cons
 \end{figure}
 
 
-\subsection{Experiment E \& Phase 14.4: Fault Recovery Latency Breakdown}
-We evaluate DRIGS fault tolerance under two failure paradigms: pure control-plane rescheduling (Experiment E) and physical process termination via an unannounced \texttt{SIGKILL} (\texttt{kill -9}) signal (Phase 14.4).
+\subsection{Experiment D: Fault Recovery Latency Breakdown}
+We evaluate DRIGS fault tolerance under two failure paradigms: pure control-plane rescheduling and physical process termination via an unannounced \texttt{SIGKILL} (\texttt{kill -9}) signal.
 
 \begin{table}[htbp]
 \centering
@@ -99,8 +120,8 @@ We evaluate DRIGS fault tolerance under two failure paradigms: pure control-plan
 \toprule
 \textbf{Recovery Stage} & \textbf{Latency / Value} \\
 \midrule
-Control-Plane Rescheduling Overhead (Exp E) & \textbf{0.496 ms} \\
-Job Completion Rate under Node Failure & 100.0\% \\
+Control-Plane Rescheduling Overhead & \textbf{0.496 ms} \\
+Job Completion (Single Controlled \texttt{SIGKILL} Injection) & 100.0\% \\
 \midrule
 Physical \texttt{SIGKILL} Failure Detection & 1.32 ms \\
 Control-Plane Reschedule \& Queue Re-entry & 1.87 ms \\
@@ -111,9 +132,9 @@ CUDA Re-initialization \& Checkpoint Reload & 123.48 ms \\
 \end{tabular}
 \end{table}
 
-As detailed in Table~\ref{tab:fault_recovery}, pure control-plane rescheduling overhead is sub-millisecond (\textbf{0.496\,ms}). When a running PyTorch process is killed via physical \texttt{SIGKILL}, DRIGS achieves complete end-to-end physical wall-clock recovery in \textbf{129.13\,ms} ($0.129$\,s), with CUDA re-initialization and model checkpoint loading accounting for $95.6\%$ of total recovery time ($123.48$\,ms).
+As detailed in Table~\ref{tab:fault_recovery}, pure control-plane rescheduling overhead is sub-millisecond (\textbf{0.496\,ms}). When a running PyTorch process is killed via physical \texttt{SIGKILL}, DRIGS achieves complete end-to-end physical wall-clock recovery in \textbf{129.13\,ms} ($0.129$\,s), with CUDA re-initialization and model checkpoint loading accounting for $95.6\%$ of total recovery time ($123.48$\,ms). The 100.0\% completion figure reflects a single controlled \texttt{SIGKILL} injection; it is not a statistical completion rate across repeated failure injections at scale.
 
-\subsection{Phase 14.1: High Queue Depth Scaling ($N = 1,000$ Jobs)}
+\subsection{Experiment E: High Queue Depth Scaling ($N = 1,000$ Jobs)}
 To benchmark controller throughput under extreme scale, DRIGS was tested with job queue depths of $N = 100, 500, 1000$ jobs.
 
 \begin{table*}[htbp]
@@ -126,7 +147,7 @@ To benchmark controller throughput under extreme scale, DRIGS was tested with jo
 \midrule
 FIFO & 1.19 ms & 2.94 ms & 10.41 ms \\
 Priority & 1.78 ms & 5.96 ms & 16.79 ms \\
-BestFit & 1.12 ms & 5.96 ms & 12.97 ms \\
+GangScheduler & 1.12 ms & 5.96 ms & 12.97 ms \\
 MemoryAware & 1.38 ms & 4.36 ms & 14.40 ms \\
 TopologyAware & 1.77 ms & 7.14 ms & 8.01 ms \\
 \midrule
@@ -145,15 +166,15 @@ As shown in Table~\ref{tab:high_scale}, even at $N=1,000$ pending jobs, decision
 \end{figure*}
 
 
-\subsection{Phase 14.2: PyTorch Distributed Data Parallel (DDP) Execution}
+\subsection{Multi-GPU Execution: PyTorch Distributed Data Parallel (DDP)}
 DRIGS's \texttt{GangScheduler} and \texttt{DistributedBackend} were benchmarked on a 2-rank PyTorch DDP neural network training workload across dual GPUs.
 \begin{itemize}
     \item \textbf{Rank 0:} Mean step latency = \textbf{43.19\,ms/step}, mean AllReduce synchronization latency = \textbf{3.91\,ms}.
     \item \textbf{Rank 1:} Mean step latency = \textbf{32.29\,ms/step}, mean AllReduce synchronization latency = \textbf{15.02\,ms}.
 \end{itemize}
-Both ranks successfully synchronized loss tensors across epochs without deadlock or rendezvous timeout.
+Both ranks successfully synchronized loss tensors across epochs without deadlock or rendezvous timeout. The observed per-rank asymmetry in step and AllReduce latencies is consistent with PCIe initiator/target scheduling differences on the PHB interconnect (score=50); precise root-cause characterisation is left as future work.
 
-\subsection{Phase 14.3: VRAM Saturation Margins \& CUDA OOM Recovery}
+\subsection{Experiment F: VRAM Saturation Margins \& CUDA OOM Recovery}
 To evaluate behavior under severe GPU memory pressure, cluster memory utilization was pushed to $85\%$, $90\%$, and $95\%$ saturation.
 
 \begin{table*}[htbp]
@@ -173,7 +194,7 @@ To evaluate behavior under severe GPU memory pressure, cluster memory utilizatio
 \end{tabular}
 \end{table*}
 
-As shown in Table~\ref{tab:vram_saturation}, when VRAM saturation reaches $95\%$, \texttt{MemoryAwareScheduler} safely throttles job completion rate to $40.0\%$, preventing GPU memory over-commitment. When an synthetic CUDA Out-Of-Memory exception is injected, DRIGS catches the exception and re-queues the job in \textbf{0.021\,ms}.
+As shown in Table~\ref{tab:vram_saturation}, when VRAM saturation reaches $95\%$, \texttt{MemoryAwareScheduler} enforces admission throttling, refusing unsafe placements and reducing job completion rate to $40.0\%$. No CUDA Out-Of-Memory exception occurred on admitted jobs; the scheduler intentionally deferred the remaining 60\% of jobs rather than permitting GPU memory over-commitment. When a synthetic OOM exception is injected to test the exception path, DRIGS catches it and re-queues the job in \textbf{0.021\,ms}.
 
 \subsection{Scheduler Selection Guide}
 
@@ -189,9 +210,9 @@ A key contribution of DRIGS as a research substrate is enabling empirical compar
 \midrule
 FIFO            & Batch jobs, fairness-critical  & Lowest overhead, predictable ordering   & High P95 tail under HoL blocking \\
 Priority        & Latency-sensitive inference    & 60.09\% P95 reduction vs.\ FIFO         & Starvation risk without aging \\
-BestFit         & Resource utilization focus     & Compact VRAM packing                    & No topology awareness \\
+GangScheduler   & Multi-GPU distributed jobs      & Atomic multi-GPU reservation            & Higher wait under fragmentation \\
 MemoryAware     & High VRAM saturation ($>$85\%) & Prevents CUDA OOM at 95\% saturation    & May defer low-memory jobs \\
-TopologyAware   & Multi-GPU distributed training & +22.19\% topology-quality score          & Slower decision (graph scan) \\
+TopologyAware   & Multi-GPU distributed training & 22.19\% higher topology score           & Slower decision (graph scan) \\
 \bottomrule
 \end{tabular}
 \end{table*}
